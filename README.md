@@ -27,6 +27,20 @@ pnpm build
 
 The output is written to `dist/`. Deploy it to a static web server or open `dist/index.html` directly. Opening the file directly requires browser support for storage on `file://` pages and an API service that permits their cross-origin requests.
 
+## Android (Capacitor)
+
+The project ships with a Capacitor Android wrapper under `android/`, so it can be packaged as an APK:
+
+```sh
+pnpm build            # build the web assets into dist/
+pnpm exec cap sync android
+cd android && ./gradlew assembleDebug   # on Windows: gradlew.bat assembleDebug
+```
+
+The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. It is debug-signed and can be installed on a device directly.
+
+Building requires JDK 21 and an Android SDK with platform 36 and build-tools 36; point `sdk.dir` in `android/local.properties` at that SDK. The app is served from `https://localhost` to keep a secure context, and the API must allow cross-origin requests from it.
+
 ## Features
 
 - Multiple conversations with automatic titles, renaming, and deletion; edit prompts, regenerate replies, and switch between message branches.

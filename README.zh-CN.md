@@ -27,6 +27,20 @@ pnpm build
 
 产物位于 `dist/`，可部署到静态服务器，也可直接打开 `dist/index.html`。直接打开时，浏览器和 API 服务需允许 `file://` 页面的存储与跨域请求。
 
+## Android（Capacitor）
+
+项目已接入 Capacitor，Android 工程位于 `android/`，可直接打包 APK：
+
+```sh
+pnpm build            # 生成 dist/
+pnpm exec cap sync android
+cd android && ./gradlew assembleDebug   # Windows 用 gradlew.bat assembleDebug
+```
+
+产物是 `android/app/build/outputs/apk/debug/app-debug.apk`，使用 debug 签名，可直接安装到设备。
+
+构建环境需要 JDK 21 与 Android SDK（platform 36 + build-tools 36）；`android/local.properties` 里的 `sdk.dir` 指向本机 SDK。App 以 `https://localhost` 加载页面，保持安全上下文，API 请求的跨域由服务端放行。
+
 ## 功能
 
 - 多会话、自动标题、重命名与删除；编辑提问、重新生成和切换消息分支。
