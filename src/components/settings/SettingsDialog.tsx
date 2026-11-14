@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   IconDarkOutline16,
   IconDataOutline16,
@@ -33,6 +33,7 @@ import { Modal } from '../base/Modal.js'
 import { Select } from '../base/Select.js'
 import { showToast } from '../base/toastState.js'
 import { ApiKeyConfirm, ApiKeyField, useApiKeyEditor } from './ApiKeyField.js'
+import { downloadModel, isLocalAsrSupported, isModelReady } from '../../services/speech/localAsr.js'
 import { closeSettings, useSettingsDialog, type SettingsSection } from './settingsDialogState.js'
 import styles from './Settings.module.css'
 
@@ -99,6 +100,7 @@ const SettingsContent = () => {
               <ThemeSetting />
               <LocaleSetting />
               <TtsVoiceSetting />
+              <AsrModelSetting />
               <LocationSetting />
             </>
           ) : (
@@ -292,6 +294,95 @@ const LocaleSetting = () => {
 }
 
 /** 朗读音色：stella（海星，女声）/ tide（暗潮，男声） */
+/** ASR 语音识别模型：默认不自动下载，用户确认许可证提醒后手动下载 */
+const AsrModelSetting = () => {
+  const t = useTranslate()
+  const supported = isLocalAsrSupported()
+  const [ready, setReady] = useState<boolean | null>(null)
+  const [downloading, setDownloading] = useState(false)
+  const [noticeOpen, setNoticeOpen] = useState(false)
+
+  useEffect(() => {
+    if (!supported) {
+      return
+    }
+    let cancelled = false
+    void isModelReady().then((value) => {
+      if (!cancelled) {
+        setReady(value)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [supported])
+
+  if (!supported) {
+    return null
+  }
+
+  const download = async () => {
+    if (downloading) {
+      return
+    }
+    setNoticeOpen(false)
+    setDownloading(true)
+    try {
+      await downloadModel()
+      setReady(true)
+      showToast({ key: 'asrModelDownloaded' })
+    } catch {
+      showToast({ key: 'asrModelDownloadFailed', type: 'error' })
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const description = ready === null
+    ? ''
+    : t(ready ? 'asrModelReady' : 'asrModelNotDownloaded')
+
+  return (
+    <>
+      <SettingCell
+        label={t('settingsAsrModel')}
+        description={description}
+        status={null}
+        action={
+          <Button
+            variant="outlined"
+            size="m"
+            className={styles.cellButton}
+            disabled={downloading || ready === true}
+            onClick={() => setNoticeOpen(true)}
+          >
+            {t(downloading ? 'asrModelDownloading' : 'asrModelDownload')}
+          </Button>
+        }
+      />
+      {noticeOpen ? (
+        <Modal
+          title={t('asrModelNoticeTitle')}
+          className={styles.deleteConfirm}
+          onClose={() => setNoticeOpen(false)}
+          footer={
+            <div className={styles.deleteActions}>
+              <Button variant="outlined" autoFocus onClick={() => setNoticeOpen(false)}>
+                {t('asrModelNoticeCancel')}
+              </Button>
+              <Button variant="primary" onClick={() => void download()}>
+                {t('asrModelNoticeConfirm')}
+              </Button>
+            </div>
+          }
+        >
+          {t('asrModelNoticeBody')}
+        </Modal>
+      ) : null}
+    </>
+  )
+}
+
 const TtsVoiceSetting = () => {
   const t = useTranslate()
   const ttsVoice = useSettings((state) => state.ttsVoice)

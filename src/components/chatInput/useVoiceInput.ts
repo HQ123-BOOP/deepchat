@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TranslationMessage } from '../../i18n/index.js'
 import {
-  downloadModel,
   isLocalAsrSupported,
   isModelReady,
   transcribeLocal,
@@ -98,12 +97,9 @@ export const useVoiceInput = (onText: (text: string) => void) => {
     if (!AVAILABLE) {
       return
     }
-    // 首次使用需要 135 MB 的离线模型：先下载，本次点击不开始录音。
+    // 模型默认不自动下载，需要在设置里手动下载后再使用。
     if (status === 'idle' && !(await isModelReady())) {
-      void downloadModel().catch(() => {
-        showToast({ key: 'voiceInputModelDownloadFailed' })
-      })
-      showToast({ key: 'voiceInputModelDownloading' })
+      showToast({ key: 'voiceInputModelMissing' })
       return
     }
     if (status === 'recording') {
