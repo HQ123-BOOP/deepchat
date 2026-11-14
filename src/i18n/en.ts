@@ -164,6 +164,10 @@ export const en = {
   voiceInputNoDevice: 'No microphone detected',
   voiceInputTooLong: 'Recording is too long. Please shorten it and try again.',
   voiceInputFailed: 'Speech recognition failed. Please try again later.',
+  voiceInputModelDownloading:
+    'Downloading the offline speech model (about 135 MB). Tap the microphone again when it finishes.',
+  voiceInputModelDownloadFailed:
+    'Failed to download the offline speech model. Check your connection and try again.',
   voiceInputEmpty: 'No speech detected',
   voiceInputLimitReached: 'Maximum recording length reached',
   voiceInputRequiresHttps: 'Voice input requires HTTPS',

@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TranslationMessage } from '../../i18n/index.js'
-import { transcribe } from '../../services/api/speech.js'
+import {
+  downloadModel,
+  isLocalAsrSupported,
+  isModelReady,
+  transcribeLocal,
+} from '../../services/speech/localAsr.js'
 import { startRecording, type Recording } from '../../services/speech/recorder.js'
-import { useSettings } from '../../services/settings.js'
 import { showToast } from '../base/toastState.js'
 
 export type VoiceInputStatus = 'idle' | 'recording' | 'transcribing'
 
 /**
- * 录音依赖 getUserMedia，只在安全上下文可用（HTTPS、localhost、file://）。
- * 普通 HTTP 页面上直接禁用入口，避免点击后必然失败。
+ * 录音依赖 getUserMedia，转写依赖 Tauri 壳里的本地模型；
+ * 网页版没有本地识别能力，直接禁用入口。
  */
-const AVAILABLE = typeof window === 'undefined' || window.isSecureContext
+const AVAILABLE =
+  typeof window !== 'undefined' && window.isSecureContext && isLocalAsrSupported()
 
 const describeRecordingError = (error: unknown): TranslationMessage => {
   if (error instanceof DOMException) {
@@ -34,7 +39,6 @@ export const useVoiceInput = (onText: (text: string) => void) => {
   /** 本次录音已录秒数，只在录音中递增 */
   const [seconds, setSeconds] = useState(0)
   const recordingRef = useRef<Recording | null>(null)
-  const controllerRef = useRef<AbortController | null>(null)
   const operationRef = useRef(0)
   const onTextRef = useRef(onText)
   onTextRef.current = onText
@@ -43,8 +47,6 @@ export const useVoiceInput = (onText: (text: string) => void) => {
     operationRef.current++
     recordingRef.current?.cancel()
     recordingRef.current = null
-    controllerRef.current?.abort()
-    controllerRef.current = null
   }, [])
 
   const cancel = useCallback(() => {
@@ -61,22 +63,19 @@ export const useVoiceInput = (onText: (text: string) => void) => {
     }
     const operation = operationRef.current
     recordingRef.current = null
-    let controller: AbortController | null = null
     try {
-      let audio: Blob | null
+      let pcm: Float32Array | null
       try {
-        audio = await recording.stop()
+        pcm = await recording.stop()
       } finally {
         recording.cancel()
       }
-      if (operationRef.current !== operation || !audio) {
+      if (operationRef.current !== operation || !pcm) {
         return
       }
-      controller = new AbortController()
-      controllerRef.current = controller
       setStatus('transcribing')
-      const text = await transcribe(useSettings.getState().apiKey ?? '', audio, controller.signal)
-      if (controller.signal.aborted || operationRef.current !== operation) {
+      const text = await transcribeLocal(pcm)
+      if (operationRef.current !== operation) {
         return
       }
       if (text.trim()) {
@@ -85,12 +84,11 @@ export const useVoiceInput = (onText: (text: string) => void) => {
         showToast({ key: 'voiceInputEmpty' })
       }
     } catch {
-      if (operationRef.current === operation && !controller?.signal.aborted) {
+      if (operationRef.current === operation) {
         showToast({ key: 'voiceInputFailed' })
       }
     } finally {
       if (operationRef.current === operation) {
-        controllerRef.current = null
         setStatus('idle')
       }
     }
@@ -98,6 +96,14 @@ export const useVoiceInput = (onText: (text: string) => void) => {
 
   const toggle = useCallback(async () => {
     if (!AVAILABLE) {
+      return
+    }
+    // 首次使用需要 135 MB 的离线模型：先下载，本次点击不开始录音。
+    if (status === 'idle' && !(await isModelReady())) {
+      void downloadModel().catch(() => {
+        showToast({ key: 'voiceInputModelDownloadFailed' })
+      })
+      showToast({ key: 'voiceInputModelDownloading' })
       return
     }
     if (status === 'recording') {

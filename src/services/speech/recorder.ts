@@ -11,8 +11,8 @@ export const MAX_SECONDS = 120
 const BUFFER_SIZE = 4096
 
 export type Recording = {
-  /** 停止录音并返回 WAV；没有采到声音时返回 null */
-  stop: () => Promise<Blob | null>
+  /** 停止录音并返回 16 kHz 单声道 PCM；没有采到声音时返回 null */
+  stop: () => Promise<Float32Array | null>
   /** 放弃录音，释放麦克风 */
   cancel: () => void
   /** 频谱分析节点，只读；采样率与录音一致 */
@@ -86,7 +86,7 @@ export const startRecording = async (onLimit: () => void): Promise<Recording> =>
     return {
       stop: async () => {
         release()
-        return length === 0 ? null : encodeWav(chunks, length)
+        return length === 0 ? null : concatSamples(chunks, length)
       },
       cancel: release,
       analyser,
@@ -97,36 +97,14 @@ export const startRecording = async (onLimit: () => void): Promise<Recording> =>
   }
 }
 
-const encodeWav = (chunks: Float32Array[], length: number) => {
+const concatSamples = (chunks: Float32Array[], length: number) => {
   const samples = Math.min(length, MAX_SECONDS * SAMPLE_RATE)
-  const buffer = new ArrayBuffer(44 + samples * 2)
-  const view = new DataView(buffer)
-  const writeString = (offset: number, text: string) => {
-    for (let i = 0; i < text.length; i++) {
-      view.setUint8(offset + i, text.charCodeAt(i))
-    }
-  }
-  writeString(0, 'RIFF')
-  view.setUint32(4, 36 + samples * 2, true)
-  writeString(8, 'WAVE')
-  writeString(12, 'fmt ')
-  view.setUint32(16, 16, true)
-  view.setUint16(20, 1, true) // PCM
-  view.setUint16(22, 1, true) // 单声道
-  view.setUint32(24, SAMPLE_RATE, true)
-  view.setUint32(28, SAMPLE_RATE * 2, true)
-  view.setUint16(32, 2, true)
-  view.setUint16(34, 16, true)
-  writeString(36, 'data')
-  view.setUint32(40, samples * 2, true)
-  let offset = 44
+  const out = new Float32Array(samples)
   let written = 0
   for (const chunk of chunks) {
     for (let i = 0; i < chunk.length && written < samples; i++, written++) {
-      const sample = Math.max(-1, Math.min(1, chunk[i]))
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
-      offset += 2
+      out[written] = chunk[i]
     }
   }
-  return new Blob([buffer], { type: 'audio/wav' })
+  return out
 }

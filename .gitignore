@@ -9,3 +9,8 @@ build/
 .env.*
 !.env.example
 tmp/
+
+# Tauri / Rust 构建产物
+src-tauri/target/
+# 原生 ASR 库由 CrispASR 单独构建，不进仓库（单个 .so 218 MB）
+src-tauri/gen/android/app/src/main/jniLibs/

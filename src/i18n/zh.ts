@@ -155,6 +155,8 @@ export const zh = {
   voiceInputNoDevice: '未检测到麦克风',
   voiceInputTooLong: '录音过长，请缩短后重试',
   voiceInputFailed: '语音识别失败，请稍后再试',
+  voiceInputModelDownloading: '正在下载离线语音识别模型（约 135 MB），完成后请再点一次麦克风',
+  voiceInputModelDownloadFailed: '离线语音识别模型下载失败，请检查网络后重试',
   voiceInputEmpty: '未识别到语音内容',
   voiceInputLimitReached: '已达到单次录音时长上限',
   voiceInputRequiresHttps: '非 HTTPS 页面无法使用语音输入',
