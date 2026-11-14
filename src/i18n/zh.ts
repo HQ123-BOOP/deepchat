@@ -162,6 +162,7 @@ export const zh = {
   asrModelNotDownloaded: '未下载（约 135 MB）',
   asrModelDownload: '下载',
   asrModelDownloading: '下载中…',
+  asrModelDownloadingPercent: '下载中 {percent}%',
   asrModelDownloaded: '语音识别模型已下载',
   asrModelDownloadFailed: '下载失败，请检查网络后重试',
   asrModelNoticeTitle: '提醒',

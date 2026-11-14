@@ -11,7 +11,8 @@ pub fn run() {
             asr::asr_available,
             asr::asr_model_path,
             asr::asr_model_ready,
-            asr::asr_download_model
+            asr::asr_download_model,
+            asr::asr_download_progress
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

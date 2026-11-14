@@ -4,6 +4,7 @@
 //! 依赖的 libggml*/libomp/libc++_shared 会被一并加载，这里按名字再次 dlopen 即可拿到句柄。
 
 use std::ffi::{c_char, c_float, c_int, c_void, CStr, CString};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use libloading::Library;
@@ -142,11 +143,43 @@ pub fn asr_available() -> bool {
     load_api().is_ok()
 }
 
-/// SenseVoice-Small Q4_K 权重地址（HuggingFace 直连在国内不可用，默认走镜像）
-const MODEL_URL: &str =
-    "https://hf-mirror.com/cstr/sensevoice-small-GGUF/resolve/main/sensevoice-small-q4_k.gguf";
+/// SenseVoice-Small Q4_K 的下载源。三个源的文件不是同一份字节：
+/// 只有 huggingface / hf-mirror 是带 CMVN 的当前版本，ModelScope 上那份是修复前的旧转换。
+/// 每个源各自记录体积与 SHA-256，下载完成后按所属源校验。
+struct ModelSource {
+    name: &'static str,
+    url: &'static str,
+    size: u64,
+    sha256: &'static str,
+}
+
+const MODEL_SOURCES: &[ModelSource] = &[
+    ModelSource {
+        name: "huggingface",
+        url: "https://huggingface.co/cstr/sensevoice-small-GGUF/resolve/main/sensevoice-small-q4_k.gguf",
+        size: 135_553_632,
+        sha256: "8a41cfd32e6fd8f5ca330e2425e87bfbed128b42779b40dcc5d100040ec63cc9",
+    },
+    ModelSource {
+        name: "hf-mirror",
+        url: "https://hf-mirror.com/cstr/sensevoice-small-GGUF/resolve/main/sensevoice-small-q4_k.gguf",
+        size: 135_553_632,
+        sha256: "8a41cfd32e6fd8f5ca330e2425e87bfbed128b42779b40dcc5d100040ec63cc9",
+    },
+    ModelSource {
+        name: "modelscope",
+        url: "https://modelscope.cn/models/cloudlnk/sensevoice-small-GGUF/resolve/master/sensevoice-small-q4_k.gguf",
+        size: 135_549_024,
+        sha256: "b76123fcdf8dd447867446ad4fab3d071bec1cf327ec107829563346307e3891",
+    },
+];
+
 /// 小于该体积视为未下载完成
 const MODEL_MIN_BYTES: u64 = 120 * 1024 * 1024;
+
+static DL_DONE: AtomicU64 = AtomicU64::new(0);
+static DL_TOTAL: AtomicU64 = AtomicU64::new(0);
+static DL_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 fn model_file(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     use tauri::Manager;
@@ -173,13 +206,110 @@ pub fn asr_model_ready(app: tauri::AppHandle) -> bool {
     }
 }
 
-fn download_to(path: &std::path::Path) -> Result<(), String> {
+#[derive(serde::Serialize)]
+pub struct DownloadProgress {
+    downloaded: u64,
+    total: u64,
+    active: bool,
+}
+
+#[tauri::command]
+pub fn asr_download_progress() -> DownloadProgress {
+    DownloadProgress {
+        downloaded: DL_DONE.load(Ordering::Relaxed),
+        total: DL_TOTAL.load(Ordering::Relaxed),
+        active: DL_ACTIVE.load(Ordering::Relaxed),
+    }
+}
+
+/// 用一次很小的 Range 请求测首个响应字节的耗时，作为下载源的延迟。
+fn probe_latency(source: &ModelSource) -> Option<std::time::Duration> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()?;
+    let started = std::time::Instant::now();
+    let mut response = client
+        .get(source.url)
+        .header(reqwest::header::RANGE, "bytes=0-1023")
+        .send()
+        .ok()?;
+    if !response.status().is_success() && response.status().as_u16() != 206 {
+        return None;
+    }
+    let mut buf = [0u8; 1];
+    use std::io::Read;
+    response.read_exact(&mut buf).ok()?;
+    Some(started.elapsed())
+}
+
+/// 并发探测所有源的延迟，返回最快的一个；全部不可达时回退到第一个源。
+fn pick_source() -> &'static ModelSource {
+    let mut handles = Vec::new();
+    for source in MODEL_SOURCES {
+        handles.push(std::thread::spawn(move || (source, probe_latency(source))));
+    }
+    let mut best: Option<(&'static ModelSource, std::time::Duration)> = None;
+    for handle in handles {
+        if let Ok((source, Some(latency))) = handle.join() {
+            println!("[asr] source {} latency {} ms", source.name, latency.as_millis());
+            if best.map(|(_, current)| latency < current).unwrap_or(true) {
+                best = Some((source, latency));
+            }
+        }
+    }
+    match best {
+        Some((source, latency)) => {
+            println!("[asr] picked {} ({} ms)", source.name, latency.as_millis());
+            source
+        }
+        None => {
+            println!("[asr] no source reachable, falling back to {}", MODEL_SOURCES[0].name);
+            &MODEL_SOURCES[0]
+        }
+    }
+}
+
+fn hex_upper(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
+fn sha256_of(path: &std::path::Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).map_err(|e| format!("无法读取下载文件: {e}"))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 1 << 20];
+    loop {
+        let read = file.read(&mut buffer).map_err(|e| format!("读取失败: {e}"))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hex_upper(&hasher.finalize()))
+}
+
+fn download_to(source: &ModelSource, path: &std::path::Path) -> Result<(), String> {
     use std::io::{Read, Write};
     let tmp = path.with_extension("gguf.part");
-    let mut response = reqwest::blocking::get(MODEL_URL)
-        .map_err(|e| format!("下载失败: {e}"))?
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .map_err(|e| format!("无法创建下载客户端: {e}"))?;
+    let mut response = client
+        .get(source.url)
+        .send()
+        .map_err(|e| format!("下载失败（{}）: {e}", source.name))?
         .error_for_status()
-        .map_err(|e| format!("下载失败: {e}"))?;
+        .map_err(|e| format!("下载失败（{}）: {e}", source.name))?;
+    DL_TOTAL.store(response.content_length().unwrap_or(source.size), Ordering::Relaxed);
+    DL_DONE.store(0, Ordering::Relaxed);
     let mut file = std::fs::File::create(&tmp).map_err(|e| format!("无法创建临时文件: {e}"))?;
     let mut buffer = vec![0u8; 1 << 20];
     loop {
@@ -189,22 +319,37 @@ fn download_to(path: &std::path::Path) -> Result<(), String> {
         }
         file.write_all(&buffer[..read])
             .map_err(|e| format!("写入失败: {e}"))?;
+        DL_DONE.fetch_add(read as u64, Ordering::Relaxed);
     }
     file.flush().map_err(|e| format!("写入失败: {e}"))?;
     drop(file);
+
     let size = std::fs::metadata(&tmp).map(|m| m.len()).unwrap_or(0);
-    if size < MODEL_MIN_BYTES {
+    if size != source.size {
         let _ = std::fs::remove_file(&tmp);
-        return Err(format!("下载的文件不完整（{size} 字节）"));
+        return Err(format!("下载的文件不完整（{size} 字节，预期 {}）", source.size));
+    }
+    let digest = sha256_of(&tmp)?;
+    if !digest.eq_ignore_ascii_case(source.sha256) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("校验失败（{}）", source.name));
     }
     std::fs::rename(&tmp, path).map_err(|e| format!("保存模型失败: {e}"))?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn asr_download_model(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn asr_download_model(app: tauri::AppHandle) -> Result<String, String> {
     let path = model_file(&app)?;
-    tauri::async_runtime::spawn_blocking(move || download_to(&path))
-        .await
-        .map_err(|e| format!("下载任务异常: {e}"))?
+    DL_ACTIVE.store(true, Ordering::Relaxed);
+    DL_DONE.store(0, Ordering::Relaxed);
+    DL_TOTAL.store(0, Ordering::Relaxed);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let source = pick_source();
+        download_to(source, &path).map(|_| source.name.to_string())
+    })
+    .await
+    .map_err(|e| format!("下载任务异常: {e}"))?;
+    DL_ACTIVE.store(false, Ordering::Relaxed);
+    result
 }

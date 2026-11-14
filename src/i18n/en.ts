@@ -171,6 +171,7 @@ export const en = {
   asrModelNotDownloaded: 'Not downloaded (about 135 MB)',
   asrModelDownload: 'Download',
   asrModelDownloading: 'Downloading…',
+  asrModelDownloadingPercent: 'Downloading {percent}%',
   asrModelDownloaded: 'Speech model downloaded',
   asrModelDownloadFailed: 'Download failed. Check your connection and try again.',
   asrModelNoticeTitle: 'Notice',

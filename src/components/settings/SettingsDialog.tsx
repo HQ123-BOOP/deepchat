@@ -33,7 +33,12 @@ import { Modal } from '../base/Modal.js'
 import { Select } from '../base/Select.js'
 import { showToast } from '../base/toastState.js'
 import { ApiKeyConfirm, ApiKeyField, useApiKeyEditor } from './ApiKeyField.js'
-import { downloadModel, isLocalAsrSupported, isModelReady } from '../../services/speech/localAsr.js'
+import {
+  downloadModel,
+  getDownloadProgress,
+  isLocalAsrSupported,
+  isModelReady,
+} from '../../services/speech/localAsr.js'
 import { closeSettings, useSettingsDialog, type SettingsSection } from './settingsDialogState.js'
 import styles from './Settings.module.css'
 
@@ -301,6 +306,7 @@ const AsrModelSetting = () => {
   const [ready, setReady] = useState<boolean | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [noticeOpen, setNoticeOpen] = useState(false)
+  const [percent, setPercent] = useState(0)
 
   useEffect(() => {
     if (!supported) {
@@ -327,6 +333,14 @@ const AsrModelSetting = () => {
     }
     setNoticeOpen(false)
     setDownloading(true)
+    setPercent(0)
+    const timer = setInterval(() => {
+      void getDownloadProgress().then((progress) => {
+        if (progress.total > 0) {
+          setPercent(Math.min(100, Math.round((progress.downloaded / progress.total) * 100)))
+        }
+      })
+    }, 400)
     try {
       await downloadModel()
       setReady(true)
@@ -334,13 +348,16 @@ const AsrModelSetting = () => {
     } catch {
       showToast({ key: 'asrModelDownloadFailed', type: 'error' })
     } finally {
+      clearInterval(timer)
       setDownloading(false)
     }
   }
 
-  const description = ready === null
-    ? ''
-    : t(ready ? 'asrModelReady' : 'asrModelNotDownloaded')
+  const description = downloading
+    ? t('asrModelDownloadingPercent', { percent })
+    : ready === null
+      ? ''
+      : t(ready ? 'asrModelReady' : 'asrModelNotDownloaded')
 
   return (
     <>
@@ -360,6 +377,31 @@ const AsrModelSetting = () => {
           </Button>
         }
       />
+      {downloading ? (
+        <div
+          role="progressbar"
+          aria-valuenow={percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          style={{
+            height: 4,
+            marginBlock: 8,
+            borderRadius: 2,
+            background: 'var(--dsw-alias-bg-skeleton)',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              height: '100%',
+              width: `${percent}%`,
+              borderRadius: 2,
+              background: 'var(--dsw-alias-brand-primary)',
+              transition: 'width 200ms ease',
+            }}
+          />
+        </div>
+      ) : null}
       {noticeOpen ? (
         <Modal
           title={t('asrModelNoticeTitle')}

@@ -114,3 +114,13 @@ if (typeof document !== 'undefined') {
     }
   })
 }
+
+/** 下载进度；未开始下载时为 0/0 */
+export type DownloadProgress = { downloaded: number; total: number; active: boolean }
+
+export const getDownloadProgress = async (): Promise<DownloadProgress> => {
+  if (!isLocalAsrSupported()) {
+    return { downloaded: 0, total: 0, active: false }
+  }
+  return invoke<DownloadProgress>('asr_download_progress')
+}
