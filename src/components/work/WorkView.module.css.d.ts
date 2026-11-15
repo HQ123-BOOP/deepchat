@@ -1,0 +1,22 @@
+declare const styles: {
+  readonly "panel": string;
+  readonly "title": string;
+  readonly "hint": string;
+  readonly "field": string;
+  readonly "row": string;
+  readonly "action": string;
+  readonly "error": string;
+  readonly "bar": string;
+  readonly "linkButton": string;
+  readonly "list": string;
+  readonly "group": string;
+  readonly "item": string;
+  readonly "chat": string;
+  readonly "message": string;
+  readonly "user": string;
+  readonly "assistant": string;
+  readonly "thinking": string;
+  readonly "note": string;
+  readonly "composer": string;
+};
+export = styles;

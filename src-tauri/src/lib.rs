@@ -1,4 +1,5 @@
 mod asr;
+mod secrets;
 
 /// Tauri 2 移动端入口与桌面端共用。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -12,7 +13,10 @@ pub fn run() {
             asr::asr_model_path,
             asr::asr_model_ready,
             asr::asr_download_model,
-            asr::asr_download_progress
+            asr::asr_download_progress,
+            secrets::secret_set,
+            secrets::secret_get,
+            secrets::secret_delete
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
