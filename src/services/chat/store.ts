@@ -4,6 +4,8 @@ import { ApiError, streamMessage } from '../api/client.js'
 import { createOpenAiCompatibleProvider } from '../providers/openai.js'
 import { runProviderReply } from './providerReply.js'
 import { buildProviderMessages } from './providerContext.js'
+import { ocrFile } from '../tools/deepseekTools.js'
+import { loadFile } from './db.js'
 import type { ChatModel, CreateMessageRequest } from '../api/types.js'
 import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
@@ -994,9 +996,31 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         persist(sessionId)
         const providerConfig = useSettings.getState().provider
         if (providerConfig.kind === 'openai') {
-          // 其他提供商：附件协议不通用，本轮直接拒绝而不是静默丢弃
-          if (prepared.question.files.length > 0) {
-            throw new ApiError('protocol', '当前提供商不支持附件，请切换到 DeepSeek')
+          // 其他提供商没有 Files API：附件先用 DeepSeek OCR 转成文本再注入提问
+          let providerQuestion = prepared.question
+          if (providerQuestion.files.length > 0) {
+            const ocrKey = useSettings.getState().apiKey ?? ''
+            if (!ocrKey) {
+              throw new ApiError('protocol', '附件需要 DeepSeek API Key 做 OCR，请先在设置中填写')
+            }
+            const parts: string[] = []
+            for (const file of providerQuestion.files) {
+              const blob = await loadFile(file.id)
+              if (!blob) {
+                continue
+              }
+              const result = await ocrFile({
+                apiKey: ocrKey,
+                file: blob,
+                fileName: file.name,
+                signal: controller.signal,
+              })
+              parts.push(['【附件：', file.name, '】', result.pages.map((page) => page.text).join('\n\n')].join('\n'))
+            }
+            providerQuestion = {
+              ...providerQuestion,
+              content: [providerQuestion.content, ...parts].filter(Boolean).join('\n\n'),
+            }
           }
           const chatProvider = createOpenAiCompatibleProvider({
             baseUrl: providerConfig.baseUrl,
@@ -1007,7 +1031,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
             model: providerConfig.model,
             systemPrompt: SYSTEM_PROMPT,
             history: prepared.history,
-            question: prepared.question,
+            question: providerQuestion,
             budget: { window: 131072, maxOutput: 8192 },
             toolsEnabled: initial.search ?? false,
             signal: controller.signal,

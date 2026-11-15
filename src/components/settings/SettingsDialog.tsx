@@ -21,6 +21,7 @@ import { regionCodes, getRegionName, provinces } from '../../services/location.j
 import {
   isChineseBrowser,
   setLocale,
+  setProviderConfig,
   setLocation,
   setThemePreference,
   setTtsVoice,
@@ -111,6 +112,7 @@ const SettingsContent = () => {
           ) : (
             <>
               <ApiKeyField editor={apiKeyEditor} />
+              <ProviderSetting />
               <ImportHistory historyImport={historyImport} disabled={historyBusy} />
               <ExportHistory disabled={historyBusy} />
               <SettingCell
@@ -299,6 +301,64 @@ const LocaleSetting = () => {
 }
 
 /** 朗读音色：stella（海星，女声）/ tide（暗潮，男声） */
+/** 对话提供商：DeepSeek 走原生协议，其他走 OpenAI 兼容端点（联网工具仍由 DeepSeek 提供） */
+const ProviderSetting = () => {
+  const t = useTranslate()
+  const provider = useSettings((state) => state.provider)
+  const fieldStyle = { marginTop: 8 } as const
+  return (
+    <div className={styles.cell}>
+      <div className={styles.label}>{t('settingsProvider')}</div>
+      <div style={{ marginTop: 8 }}>
+        <Select
+          ariaLabel={t('settingsProvider')}
+          value={provider.kind}
+          options={[
+            { value: 'deepseek', label: t('settingsProviderDeepseek') },
+            { value: 'openai', label: t('settingsProviderOpenai') },
+          ]}
+          onChange={(kind) => setProviderConfig({ kind })}
+        />
+      </div>
+      {provider.kind === 'openai' ? (
+        <>
+          <div className={styles.apiKeyInput} style={fieldStyle}>
+            <input
+              placeholder={t('settingsProviderBaseUrl')}
+              autoComplete="off"
+              spellCheck={false}
+              value={provider.baseUrl}
+              onChange={(event) => setProviderConfig({ baseUrl: event.target.value })}
+            />
+          </div>
+          <div className={styles.apiKeyInput} style={fieldStyle}>
+            <input
+              type="password"
+              placeholder={t('settingsProviderApiKey')}
+              autoComplete="off"
+              spellCheck={false}
+              value={provider.apiKey}
+              onChange={(event) => setProviderConfig({ apiKey: event.target.value })}
+            />
+          </div>
+          <div className={styles.apiKeyInput} style={fieldStyle}>
+            <input
+              placeholder={t('settingsProviderModel')}
+              autoComplete="off"
+              spellCheck={false}
+              value={provider.model}
+              onChange={(event) => setProviderConfig({ model: event.target.value })}
+            />
+          </div>
+          <div className={styles.description} style={{ marginTop: 8 }}>
+            {t('settingsProviderHint')}
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
 /** ASR 语音识别模型：默认不自动下载，用户确认许可证提醒后手动下载 */
 const AsrModelSetting = () => {
   const t = useTranslate()
