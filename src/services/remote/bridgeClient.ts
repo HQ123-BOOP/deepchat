@@ -93,6 +93,47 @@ export type HistoryPage = {
   total: number
 }
 
+export type ConfigValue = { value: string; name: string; description?: string }
+export type ConfigGroup = { group: string; name: string; options: ConfigValue[] }
+export type ConfigOption = {
+  id: string
+  name: string
+  category?: string
+  type: 'select'
+  currentValue: string
+  options: (ConfigValue | ConfigGroup)[]
+}
+
+/** 会话配置项：模型、推理强度等 */
+export const fetchConfig = async (
+  host: string,
+  port: number,
+  token: string,
+  sessionId: string
+): Promise<ConfigOption[]> => {
+  const result = await request<{ configOptions: ConfigOption[] }>(
+    `${base(host, port)}/v1/sessions/${encodeURIComponent(sessionId)}/config`,
+    token
+  )
+  return result.configOptions ?? []
+}
+
+export const setConfigOption = async (
+  host: string,
+  port: number,
+  token: string,
+  sessionId: string,
+  configId: string,
+  value: string
+): Promise<ConfigOption[]> => {
+  const result = await request<{ configOptions?: ConfigOption[] }>(
+    `${base(host, port)}/v1/sessions/${encodeURIComponent(sessionId)}/config`,
+    token,
+    { method: 'POST', body: JSON.stringify({ configId, value }) }
+  )
+  return result.configOptions ?? []
+}
+
 /** 会话历史：桥接端从 DSH 的会话日志还原出来的消息，支持从最新往前分页 */
 export const fetchHistory = async (
   host: string,

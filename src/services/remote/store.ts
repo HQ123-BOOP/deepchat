@@ -9,8 +9,10 @@ import {
   cancelSession,
   createSession,
   listSessions,
+  fetchConfig,
   fetchHistory,
   pair,
+  setConfigOption,
   sendMessage,
   subscribe,
   type BridgeSession,
@@ -46,6 +48,10 @@ type WorkState = {
   /** 历史是否还有更早的内容，以及正在加载时的占位状态 */
   hasMore: boolean
   historyLoading: boolean
+  /** 当前会话的 ACP 配置项（模型、推理强度） */
+  config: import('./bridgeClient.js').ConfigOption[]
+  /** 每条消息对应一次设置请求，避免并发时显示错乱 */
+  configBusy: boolean
 }
 
 type WorkActions = {
@@ -58,6 +64,8 @@ type WorkActions = {
   loadOlder: () => Promise<void>
   send: (text: string) => Promise<void>
   cancel: () => Promise<void>
+  loadConfig: () => Promise<void>
+  applyConfig: (configId: string, value: string) => Promise<void>
   /** 在当前工作区新建一个会话并发送第一条消息 */
   startNewSession: (text: string) => Promise<void>
 }
@@ -83,6 +91,8 @@ export const useWorkStore = create<WorkState & WorkActions>((set, get) => ({
   streaming: false,
   hasMore: false,
   historyLoading: false,
+  config: [],
+  configBusy: false,
 
   restore: async () => {
     const token = await secureGet(TOKEN_KEY)
@@ -276,6 +286,39 @@ export const useWorkStore = create<WorkState & WorkActions>((set, get) => ({
     await sendMessage(host, port, token, activeSessionId, text)
   },
 
+  loadConfig: async () => {
+    const { host, port, token, activeSessionId } = get()
+    if (!token || !activeSessionId) {
+      return
+    }
+    try {
+      const config = await fetchConfig(host, port, token, activeSessionId)
+      if (get().activeSessionId === activeSessionId) {
+        set({ config })
+      }
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+    }
+  },
+
+  applyConfig: async (configId, value) => {
+    const { host, port, token, activeSessionId } = get()
+    if (!token || !activeSessionId) {
+      return
+    }
+    set({ configBusy: true })
+    try {
+      const config = await setConfigOption(host, port, token, activeSessionId, configId, value)
+      if (get().activeSessionId === activeSessionId) {
+        set({ config })
+      }
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+    } finally {
+      set({ configBusy: false })
+    }
+  },
+
   startNewSession: async (text) => {
     const { host, port, token, sessions } = get()
     if (!token) {
@@ -293,11 +336,13 @@ export const useWorkStore = create<WorkState & WorkActions>((set, get) => ({
         messages: [],
         hasMore: false,
         streaming: true,
+        config: [],
       })
       set((state) => ({
         messages: [...state.messages, { id: nextId(), role: 'user', text, thinking: '', note: '' }],
       }))
       get().openSession(created.sessionId)
+      void get().loadConfig()
       await sendMessage(host, port, token, created.sessionId, text)
       void get().refresh()
     } catch (error) {

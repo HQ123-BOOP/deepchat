@@ -3,6 +3,7 @@ import { Markdown } from '../markdown/Markdown.js'
 import { useTranslate } from '../../i18n/index.js'
 import { parsePairingUri } from '../../services/remote/bridgeClient.js'
 import { QrScanDialog } from './QrScanDialog.js'
+import { WorkComposer } from './WorkComposer.js'
 import { useWorkStore } from '../../services/remote/store.js'
 import styles from './WorkView.module.css'
 
@@ -105,30 +106,7 @@ const WorkWelcome = () => {
       <div className={styles.welcome}>
         <div className={styles.welcomeText}>{t('workWelcome')}</div>
       </div>
-      <div className={styles.composer}>
-        <textarea
-          rows={1}
-          placeholder={ready ? t('workMessagePlaceholder') : t('workConnectHint')}
-          value={draft}
-          disabled={!ready}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault()
-              submit()
-            }
-          }}
-        />
-        <button
-          type="button"
-          className={styles.sendButton}
-          disabled={!ready || !draft.trim()}
-          aria-label={t('send')}
-          onClick={submit}
-        >
-          ↑
-        </button>
-      </div>
+      <WorkComposer draft={draft} onDraftChange={setDraft} onSend={submit} disabled={!ready} />
     </div>
   )
 }
@@ -146,6 +124,11 @@ const SessionChat = () => {
   const closeSession = useWorkStore((state) => state.closeSession)
   const sessions = useWorkStore((state) => state.sessions)
   const activeSessionId = useWorkStore((state) => state.activeSessionId)
+  const loadConfig = useWorkStore((state) => state.loadConfig)
+
+  useEffect(() => {
+    void loadConfig()
+  }, [activeSessionId, loadConfig])
   const title =
     sessions.find((session) => session.sessionId === activeSessionId)?.title || t('sessionModeWork')
   const [draft, setDraft] = useState('')
@@ -256,29 +239,16 @@ const SessionChat = () => {
         })}
         {streaming ? <div className={styles.hint}>{t('workReplying')}</div> : null}
       </div>
-      <div className={styles.composer}>
-        <textarea
-          rows={1}
-          placeholder={t('workMessagePlaceholder')}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault()
-              submit()
-            }
-          }}
-        />
-        <button
-          type="button"
-          className={styles.sendButton}
-          disabled={!draft.trim()}
-          aria-label={t('send')}
-          onClick={submit}
-        >
-          ↑
-        </button>
-      </div>
+      <WorkComposer
+        draft={draft}
+        onDraftChange={setDraft}
+        onSend={() => {
+          submit()
+          stickRef.current = true
+        }}
+        streaming={streaming}
+        showConfig
+      />
     </div>
   )
 }
@@ -286,6 +256,11 @@ const SessionChat = () => {
 export const WorkView = () => {
   const status = useWorkStore((state) => state.status)
   const activeSessionId = useWorkStore((state) => state.activeSessionId)
+  const loadConfig = useWorkStore((state) => state.loadConfig)
+
+  useEffect(() => {
+    void loadConfig()
+  }, [activeSessionId, loadConfig])
   const restore = useWorkStore((state) => state.restore)
 
   useEffect(() => {
