@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Markdown } from '../markdown/Markdown.js'
 import { useTranslate } from '../../i18n/index.js'
 import { parsePairingUri } from '../../services/remote/bridgeClient.js'
 import { QrScanDialog } from './QrScanDialog.js'
@@ -138,15 +139,65 @@ const SessionList = () => {
   )
 }
 
-/** 已连接：单个会话的聊天流 */
+/** 已连接：单个会话的聊天流，渲染与主对话一致的 Markdown 和工具卡片 */
 const SessionChat = () => {
   const t = useTranslate()
   const messages = useWorkStore((state) => state.messages)
   const streaming = useWorkStore((state) => state.streaming)
+  const hasMore = useWorkStore((state) => state.hasMore)
+  const historyLoading = useWorkStore((state) => state.historyLoading)
+  const loadOlder = useWorkStore((state) => state.loadOlder)
   const send = useWorkStore((state) => state.send)
   const cancel = useWorkStore((state) => state.cancel)
   const closeSession = useWorkStore((state) => state.closeSession)
   const [draft, setDraft] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
+  /** 是否跟随新消息贴底；用户上滑后停止跟随 */
+  const stickRef = useRef(true)
+  /** 顶部加载更早内容后，恢复原来的滚动位置 */
+  const restoreRef = useRef<{ height: number; top: number } | null>(null)
+  const firstLoadRef = useRef(true)
+
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (!list) {
+      return
+    }
+    const restore = restoreRef.current
+    if (restore) {
+      restoreRef.current = null
+      list.scrollTop = list.scrollHeight - restore.height + restore.top
+      return
+    }
+    if (stickRef.current) {
+      list.scrollTop = list.scrollHeight
+    }
+    if (messages.length > 0) {
+      firstLoadRef.current = false
+    }
+  }, [messages, streaming])
+
+  const onScroll = () => {
+    const list = listRef.current
+    if (!list) {
+      return
+    }
+    stickRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 80
+    if (list.scrollTop < 40 && hasMore && !historyLoading) {
+      restoreRef.current = { height: list.scrollHeight, top: list.scrollTop }
+      void loadOlder()
+    }
+  }
+
+  const submit = () => {
+    const text = draft.trim()
+    if (!text) {
+      return
+    }
+    setDraft('')
+    stickRef.current = true
+    void send(text)
+  }
 
   return (
     <div className={styles.panel}>
@@ -160,17 +211,49 @@ const SessionChat = () => {
           </button>
         ) : null}
       </div>
-      <div className={styles.chat}>
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`${styles.message} ${message.role === 'user' ? styles.user : styles.assistant}`}
-          >
-            {message.note ? <div className={styles.note}>{message.note}</div> : null}
-            {message.thinking ? <div className={styles.thinking}>{message.thinking}</div> : null}
-            {message.text}
-          </div>
-        ))}
+      <div className={styles.chat} ref={listRef} onScroll={onScroll}>
+        {historyLoading && messages.length === 0 ? (
+          <div className={styles.hint}>{t('workHistoryLoading')}</div>
+        ) : null}
+        {messages.map((message) => {
+          if (message.role === 'tool') {
+            return (
+              <details key={message.id} className={styles.tool}>
+                <summary className={styles.toolSummary}>
+                  <span className={styles.toolName}>{message.name ?? 'tool'}</span>
+                </summary>
+                {message.input ? <pre className={styles.toolBody}>{message.input}</pre> : null}
+                {message.output ? <pre className={styles.toolBody}>{message.output}</pre> : null}
+              </details>
+            )
+          }
+          if (message.role === 'user') {
+            return (
+              <div key={message.id} className={`${styles.message} ${styles.user}`}>
+                {message.text}
+              </div>
+            )
+          }
+          return (
+            <div key={message.id} className={styles.assistantBlock}>
+              {message.thinking ? (
+                <details className={styles.thinkingBox}>
+                  <summary className={styles.thinkingSummary}>{t('workThinking')}</summary>
+                  <div className={styles.thinkingText}>{message.thinking}</div>
+                </details>
+              ) : null}
+              {message.text ? (
+                <Markdown
+                  content={message.text}
+                  loading={false}
+                  cacheKey={message.id}
+                  disableLink={false}
+                />
+              ) : null}
+            </div>
+          )
+        })}
+        {streaming ? <div className={styles.hint}>{t('workReplying')}</div> : null}
       </div>
       <div className={styles.composer}>
         <textarea
@@ -181,27 +264,18 @@ const SessionChat = () => {
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault()
-              const text = draft.trim()
-              if (text) {
-                setDraft('')
-                void send(text)
-              }
+              submit()
             }
           }}
         />
         <button
           type="button"
-          className={styles.action}
+          className={styles.sendButton}
           disabled={!draft.trim()}
-          onClick={() => {
-            const text = draft.trim()
-            if (text) {
-              setDraft('')
-              void send(text)
-            }
-          }}
+          aria-label={t('send')}
+          onClick={submit}
         >
-          {t('send')}
+          ↑
         </button>
       </div>
     </div>

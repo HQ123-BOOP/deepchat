@@ -18,5 +18,14 @@ declare const styles: {
   readonly "thinking": string;
   readonly "note": string;
   readonly "composer": string;
+  readonly "assistantBlock": string;
+  readonly "thinkingBox": string;
+  readonly "thinkingSummary": string;
+  readonly "thinkingText": string;
+  readonly "tool": string;
+  readonly "toolSummary": string;
+  readonly "toolName": string;
+  readonly "toolBody": string;
+  readonly "sendButton": string;
 };
 export = styles;

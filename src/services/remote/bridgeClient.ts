@@ -81,20 +81,34 @@ export const createSession = async (host: string, port: number, token: string, c
   })
 }
 
-export type HistoryMessage = { role: 'user' | 'assistant'; text: string; time: number }
+export type HistoryMessage =
+  | { role: 'user' | 'assistant'; text: string; time: number }
+  | { role: 'tool'; id: string; name: string; input: string; output: string; time: number }
 
-/** 会话历史：桥接端从 DSH 的会话日志还原出来的消息 */
+export type HistoryPage = {
+  messages: HistoryMessage[]
+  hasMore: boolean
+  total: number
+}
+
+/** 会话历史：桥接端从 DSH 的会话日志还原出来的消息，支持从最新往前分页 */
 export const fetchHistory = async (
   host: string,
   port: number,
   token: string,
-  sessionId: string
-): Promise<HistoryMessage[]> => {
-  const result = await request<{ messages: HistoryMessage[] }>(
-    `${base(host, port)}/v1/sessions/${encodeURIComponent(sessionId)}/history`,
+  sessionId: string,
+  { limit = 20, before = 0 }: { limit?: number; before?: number } = {}
+): Promise<HistoryPage> => {
+  const query = new URLSearchParams({ limit: String(limit), before: String(before) })
+  const result = await request<HistoryPage>(
+    `${base(host, port)}/v1/sessions/${encodeURIComponent(sessionId)}/history?${query}`,
     token
   )
-  return result.messages ?? []
+  return {
+    messages: result.messages ?? [],
+    hasMore: Boolean(result.hasMore),
+    total: result.total ?? 0,
+  }
 }
 
 export const sendMessage = async (

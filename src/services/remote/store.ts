@@ -22,10 +22,14 @@ const TOKEN_KEY = 'bridge-token'
 
 export type WorkMessage = {
   id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'tool'
   text: string
   thinking: string
   note: string
+  /** 工具卡片：名称、入参、输出 */
+  name?: string
+  input?: string
+  output?: string
 }
 
 type WorkState = {
@@ -38,6 +42,9 @@ type WorkState = {
   activeSessionId: string | null
   messages: WorkMessage[]
   streaming: boolean
+  /** 历史是否还有更早的内容，以及正在加载时的占位状态 */
+  hasMore: boolean
+  historyLoading: boolean
 }
 
 type WorkActions = {
@@ -47,6 +54,7 @@ type WorkActions = {
   refresh: () => Promise<void>
   openSession: (sessionId: string) => void
   closeSession: () => void
+  loadOlder: () => Promise<void>
   send: (text: string) => Promise<void>
   cancel: () => Promise<void>
 }
@@ -70,6 +78,8 @@ export const useWorkStore = create<WorkState & WorkActions>((set, get) => ({
   activeSessionId: null,
   messages: [],
   streaming: false,
+  hasMore: false,
+  historyLoading: false,
 
   restore: async () => {
     const token = await secureGet(TOKEN_KEY)
@@ -121,14 +131,21 @@ export const useWorkStore = create<WorkState & WorkActions>((set, get) => ({
 
   openSession: (sessionId) => {
     unsubscribe?.()
-    set({ activeSessionId: sessionId, messages: [], streaming: false })
+    set({
+      activeSessionId: sessionId,
+      messages: [],
+      streaming: false,
+      hasMore: false,
+      historyLoading: true,
+    })
     const { host, port, token } = get()
     if (!token) {
+      set({ historyLoading: false })
       return
     }
-    // 先把历史拉下来，再订阅增量，否则空会话看起来像没有内容
-    void fetchHistory(host, port, token, sessionId)
-      .then((history) => {
+    // 先取最近 20 条，再订阅增量；更早的内容由 loadOlder 按需拉取
+    void fetchHistory(host, port, token, sessionId, { limit: 20 })
+      .then((page) => {
         if (get().activeSessionId !== sessionId) {
           return
         }
@@ -136,17 +153,22 @@ export const useWorkStore = create<WorkState & WorkActions>((set, get) => ({
           state.messages.length > 0
             ? state
             : {
-                messages: history.map((message) => ({
+                messages: page.messages.map((message) => ({
                   id: nextId(),
                   role: message.role,
-                  text: message.text,
+                  text: 'text' in message ? message.text : '',
                   thinking: '',
                   note: '',
+                  name: 'name' in message ? message.name : undefined,
+                  input: 'input' in message ? message.input : undefined,
+                  output: 'output' in message ? message.output : undefined,
                 })),
+                hasMore: page.hasMore,
+                historyLoading: false,
               }
         )
       })
-      .catch((error: Error) => set({ error: error.message }))
+      .catch((error: Error) => set({ error: error.message, historyLoading: false }))
     unsubscribe = subscribe(
       host,
       port,
@@ -205,6 +227,38 @@ export const useWorkStore = create<WorkState & WorkActions>((set, get) => ({
     unsubscribe?.()
     unsubscribe = null
     set({ activeSessionId: null, messages: [], streaming: false })
+  },
+
+  loadOlder: async () => {
+    const { host, port, token, activeSessionId, messages, hasMore, historyLoading } = get()
+    if (!token || !activeSessionId || !hasMore || historyLoading) {
+      return
+    }
+    set({ historyLoading: true })
+    try {
+      const page = await fetchHistory(host, port, token, activeSessionId, {
+        limit: 20,
+        before: messages.length,
+      })
+      if (get().activeSessionId !== activeSessionId) {
+        return
+      }
+      const older = page.messages.map((message) => ({
+        id: nextId(),
+        role: message.role,
+        text: 'text' in message ? message.text : '',
+        thinking: '',
+        note: '',
+        name: 'name' in message ? message.name : undefined,
+        input: 'input' in message ? message.input : undefined,
+        output: 'output' in message ? message.output : undefined,
+      }))
+      set((state) => ({ messages: [...older, ...state.messages], hasMore: page.hasMore }))
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+    } finally {
+      set({ historyLoading: false })
+    }
   },
 
   send: async (text) => {

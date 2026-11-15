@@ -189,3 +189,88 @@
     font: inherit;
   }
 }
+
+/* 与主对话一致的气泡与工具卡片 */
+.chat {
+  padding: 4px 2px 8px;
+}
+
+.assistantBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.thinkingBox {
+  border-left: 2px solid var(--dsw-alias-border-l2);
+  padding-left: 10px;
+}
+
+.thinkingSummary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  list-style: none;
+}
+
+.thinkingText {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: pre-wrap;
+}
+
+.tool {
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background-color: var(--dsw-alias-bg-layer-2);
+}
+
+.toolSummary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+  list-style: none;
+}
+
+.toolName {
+  color: var(--dsw-alias-label-primary);
+}
+
+.toolBody {
+  margin: 8px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.composer textarea {
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.sendButton {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-label-primary-foreground);
+  font-size: 16px;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
