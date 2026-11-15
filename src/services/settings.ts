@@ -8,6 +8,9 @@ export type Locale = 'zh-CN' | 'en-US'
 export type ThemePreference = 'light' | 'dark' | 'system'
 
 /** 对话提供商：deepseek 走原生协议（服务端联网工具），openai 走 OpenAI 兼容端点 */
+/** 推理强度：对应 API 的 output_config.effort，off 表示关闭思考 */
+export type ReasoningEffort = 'off' | 'low' | 'high' | 'max'
+
 export type ProviderKind = 'deepseek' | 'openai'
 
 export type ProviderConfig = {
@@ -35,7 +38,7 @@ type Settings = {
   themePreference: ThemePreference
   location: UserLocation | null
   ttsVoice: TtsVoice
-  thinking: boolean
+  reasoningEffort: ReasoningEffort
   search: boolean
   siderCollapsed: boolean
 }
@@ -47,6 +50,7 @@ const KEYS = {
   location: 'chat-demo:location',
   themePreference: 'chat-demo:theme-preference',
   ttsVoice: 'chat-demo:tts-voice',
+  reasoningEffort: 'chat-demo:reasoning-effort',
   thinking: 'chat-demo:thinking',
   search: 'chat-demo:search',
   siderCollapsed: 'chat-demo:sider-collapsed',
@@ -125,6 +129,15 @@ const readProvider = (): ProviderConfig => {
   }
 }
 
+/** 旧版本只有 thinking 开关：true 视为 high，false 视为 off */
+const initialReasoningEffort = (): ReasoningEffort => {
+  const saved = read(KEYS.reasoningEffort)
+  if (saved === 'off' || saved === 'low' || saved === 'high' || saved === 'max') {
+    return saved
+  }
+  return read(KEYS.thinking) === 'true' ? 'high' : 'off'
+}
+
 /** 未保存过时使用服务端默认音色 stella（海星） */
 const initialTtsVoice = (): TtsVoice => (read(KEYS.ttsVoice) === 'tide' ? 'tide' : 'stella')
 
@@ -135,7 +148,7 @@ export const useSettings = create<Settings>(() => ({
   location: initialLocation(),
   themePreference: initialThemePreference(),
   ttsVoice: initialTtsVoice(),
-  thinking: read(KEYS.thinking) === 'true',
+  reasoningEffort: initialReasoningEffort(),
   search: read(KEYS.search) === 'true',
   siderCollapsed: read(KEYS.siderCollapsed) === 'true',
 }))
@@ -172,9 +185,9 @@ export const setApiKey = (apiKey: string | null) => {
   useSettings.setState({ apiKey })
 }
 
-export const setThinking = (thinking: boolean) => {
-  write(KEYS.thinking, String(thinking))
-  useSettings.setState({ thinking })
+export const setReasoningEffort = (reasoningEffort: ReasoningEffort) => {
+  write(KEYS.reasoningEffort, reasoningEffort)
+  useSettings.setState({ reasoningEffort })
 }
 
 export const setSearch = (search: boolean) => {

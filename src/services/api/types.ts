@@ -177,6 +177,8 @@ export type CreateMessageRequest = {
   system: string
   messages: MessageParam[]
   thinking: { type: 'enabled' | 'disabled' }
+  /** 推理强度；仅在思考开启时下发，取值 low/high/max */
+  output_config?: { effort: 'low' | 'high' | 'max' }
   tools: (DeepseekWebSearchTool | DeepseekReadUrlTool)[]
   safety_check: { level: 'high' }
   title?: { enabled: boolean }
