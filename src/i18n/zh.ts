@@ -188,6 +188,8 @@ export const zh = {
   convertToWorkCancel: '取消',
   convertToWorkDone: '已导入到 DSH 工作区',
   convertToWorkFailed: '转换失败',
+  workScanHint: '把电脑上的二维码对准摄像头，识别后会自动填入地址和配对码。',
+  workScanCameraFailed: '打不开摄像头，可以手动填写地址和配对码。',
   settingsProvider: '模型提供商',
   settingsProviderDeepseek: 'DeepSeek（原生）',
   settingsProviderOpenai: 'OpenAI 兼容',

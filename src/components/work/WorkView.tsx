@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Format, requestPermissions, scan } from '@tauri-apps/plugin-barcode-scanner'
 import { useTranslate } from '../../i18n/index.js'
 import { parsePairingUri } from '../../services/remote/bridgeClient.js'
-import { hasTauri } from '../../services/remote/secureStore.js'
+import { QrScanDialog } from './QrScanDialog.js'
 import { useWorkStore } from '../../services/remote/store.js'
 import styles from './WorkView.module.css'
 
@@ -20,28 +19,18 @@ const ConnectForm = () => {
   const [port, setPort] = useState(String(savedPort))
   const [code, setCode] = useState('')
   const [scanError, setScanError] = useState<string | null>(null)
+  const [scanning, setScanning] = useState(false)
 
-  const onScan = async () => {
-    setScanError(null)
-    try {
-      // 相机权限要在真正的扫码之前显式申请，否则插件会直接抛错
-      const permission = await requestPermissions()
-      if (permission !== 'granted') {
-        setScanError(t('workScanPermissionDenied'))
-        return
-      }
-      const result = await scan({ windowed: true, formats: [Format.QRCode] })
-      const parsed = parsePairingUri(result.content)
-      if (!parsed) {
-        setScanError(t('workScanUnrecognized'))
-        return
-      }
-      setHost(parsed.host)
-      setPort(String(parsed.port))
-      setCode(parsed.code)
-    } catch (error) {
-      setScanError(error instanceof Error ? error.message : t('workScanFailed'))
+  const onScanned = (content: string) => {
+    setScanning(false)
+    const parsed = parsePairingUri(content)
+    if (!parsed) {
+      setScanError(t('workScanUnrecognized'))
+      return
     }
+    setHost(parsed.host)
+    setPort(String(parsed.port))
+    setCode(parsed.code)
   }
 
   return (
@@ -76,11 +65,10 @@ const ConnectForm = () => {
           />
         </div>
       </div>
-      {hasTauri() ? (
-        <button type="button" className={styles.linkButton} onClick={() => void onScan()}>
-          {t('workScan')}
-        </button>
-      ) : null}
+      <button type="button" className={styles.linkButton} onClick={() => setScanning(true)}>
+        {t('workScan')}
+      </button>
+      {scanning ? <QrScanDialog onResult={onScanned} onClose={() => setScanning(false)} /> : null}
       {scanError ? <div className={styles.error}>{scanError}</div> : null}
       {error ? <div className={styles.error}>{error}</div> : null}
       <button

@@ -197,6 +197,8 @@ export const en = {
   convertToWorkCancel: 'Cancel',
   convertToWorkDone: 'Imported into the DSH workspace',
   convertToWorkFailed: 'Conversion failed',
+  workScanHint: 'Point the camera at the QR code on your computer; the address and code fill in automatically.',
+  workScanCameraFailed: 'Cannot open the camera; enter the address and code manually.',
   settingsProvider: 'Model provider',
   settingsProviderDeepseek: 'DeepSeek (native)',
   settingsProviderOpenai: 'OpenAI compatible',
