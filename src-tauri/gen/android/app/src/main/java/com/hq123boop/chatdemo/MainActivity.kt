@@ -1,7 +1,6 @@
 package com.hq123boop.chatdemo
 
 import android.os.Bundle
-import android.util.TypedValue
 import android.view.View
 import androidx.activity.enableEdgeToEdge
 import androidx.core.content.ContextCompat
@@ -19,13 +18,9 @@ class MainActivity : TauriActivity() {
     // edge-to-edge 下 WebView 会画到状态栏和手势条底下：给根视图补上系统栏内边距，
     // 顶部避让与官方 App 一致，否则页面最上面的内容会和状态栏重叠。
     val root = findViewById<View>(android.R.id.content)
-    // 内边距暴露的是根视图自己的背景：默认主题色不是页面的底色（在浅色设备上偏紫），
-    // 所以显式取主题的 windowBackground 铺上，让留白与页面同色。
-    val background = TypedValue()
-    theme.resolveAttribute(android.R.attr.colorBackground, background, true)
-    root.setBackgroundColor(
-      if (background.resourceId != 0) ContextCompat.getColor(this, background.resourceId) else background.data
-    )
+    // 内边距暴露的是根视图自己的背景；主题默认色和页面底色并不相同（浅色设备上偏紫），
+    // 所以直接用与页面一致的 window_background 资源铺满，日间 #FFFFFF、夜间 #151517。
+    root.setBackgroundColor(ContextCompat.getColor(this, R.color.window_background))
     ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
       val bars = insets.getInsets(
         WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
