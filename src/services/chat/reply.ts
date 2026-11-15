@@ -212,12 +212,69 @@ const toUserParam = ({ content, files }: UserMessage): MessageParam => {
       }
 }
 
+/** 检索证据落进上下文的上限：来源条数、单条摘要字数、整段字数 */
+const MAX_SEARCH_SOURCES = 12
+const MAX_SNIPPET_CHARS = 220
+const MAX_EVIDENCE_CHARS = 6000
+
+const normalizeWhitespace = (text: string) => text.replace(/\s+/g, ' ').trim()
+
+/**
+ * 把本轮的搜索来源压成一段纯文本随历史回传。
+ * 服务端不回传 web_search 工具块，只回传 read_link 的签名页面；少了这段证据，
+ * 下一轮只剩上一轮的结论而没有依据，模型会改用参数记忆去否定刚搜到的事实。
+ * 被正文引用过的来源标注「（被引用）」，让引用与来源的对应关系也保留下来。
+ */
+const formatSearchEvidence = (blocks: AssistantMessage['blocks']): string => {
+  const cited = new Set<string>()
+  for (const block of blocks) {
+    if (block.type === 'text' && block.citations) {
+      for (const citation of block.citations) {
+        cited.add(citation.url)
+      }
+    }
+  }
+  const seen = new Set<string>()
+  const lines: string[] = []
+  for (const block of blocks) {
+    if (block.type !== 'web_search_tool_result') {
+      continue
+    }
+    for (const item of block.content) {
+      if (item.type !== 'web_search_result') {
+        continue
+      }
+      const url = item.url?.trim()
+      if (!url || seen.has(url)) {
+        continue
+      }
+      seen.add(url)
+      const title = normalizeWhitespace(item.title || url)
+      const snippet = normalizeWhitespace(item.snippet ?? '').slice(0, MAX_SNIPPET_CHARS)
+      const mark = cited.has(url) ? '（被引用）' : ''
+      lines.push(`[${seen.size}] ${title}${mark}\n${url}${snippet ? `\n${snippet}` : ''}`)
+      if (seen.size >= MAX_SEARCH_SOURCES) {
+        break
+      }
+    }
+    if (seen.size >= MAX_SEARCH_SOURCES) {
+      break
+    }
+  }
+  if (lines.length === 0) {
+    return ''
+  }
+  return `【本轮检索到的网页】\n${lines.join('\n')}`.slice(0, MAX_EVIDENCE_CHARS)
+}
+
 /**
  * assistant 的内容块按历史与续写场景转换：
  * - 历史思考及其签名不回传；开启思考时续写只保留本轮非空白思考及其签名；
- * - 文本块去掉 citations（服务端忽略）。相邻文本直接拼接，被思考或工具隔开的文本用空行连接；
+ * - 文本块去掉 citations（服务端忽略），改由 formatSearchEvidence 以文本形式保留来源与引用标记。
+ *   相邻文本直接拼接，被思考或工具隔开的文本用空行连接；
  *   省略历史思考后仍保留其前后正文的空行；
- * - 工具调用和结果只保留 kind 为 read_link 的块，其他历史工具块不回传；
+ * - 工具调用和结果只保留 kind 为 read_link 的块；其余历史工具块按协议不回传，
+ *   但搜索来源会作为「本轮检索到的网页」附在历史回答末尾，续写时不追加；
  * - 阅读链接结果原样回传，保留 signature：服务端解密后将页面拼回该轮提问末尾；
  */
 const toAssistantParam = (
@@ -275,6 +332,18 @@ const toAssistantParam = (
       !unsignedReadLinks.has(block.tool_use_id)
     ) {
       content.push(block)
+    }
+  }
+  // 续写时末尾是待补全的前缀，不能追加证据，否则模型会从证据后面接着写。
+  if (!prefix) {
+    const evidence = formatSearchEvidence(blocks)
+    if (evidence) {
+      const last = content.at(-1)
+      if (last?.type === 'text') {
+        last.text = `${last.text}\n\n${evidence}`
+      } else {
+        content.push({ type: 'text', text: evidence })
+      }
     }
   }
   return {
