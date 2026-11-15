@@ -1,6 +1,9 @@
 import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
 import { ApiError, streamMessage } from '../api/client.js'
+import { createOpenAiCompatibleProvider } from '../providers/openai.js'
+import { runProviderReply } from './providerReply.js'
+import { buildProviderMessages } from './providerContext.js'
 import type { ChatModel, CreateMessageRequest } from '../api/types.js'
 import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
@@ -989,6 +992,48 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         reply = { ...reply, latestReminder }
         updateReply(sessionId, reply)
         persist(sessionId)
+        const providerConfig = useSettings.getState().provider
+        if (providerConfig.kind === 'openai') {
+          // 其他提供商：附件协议不通用，本轮直接拒绝而不是静默丢弃
+          if (prepared.question.files.length > 0) {
+            throw new ApiError('protocol', '当前提供商不支持附件，请切换到 DeepSeek')
+          }
+          const chatProvider = createOpenAiCompatibleProvider({
+            baseUrl: providerConfig.baseUrl,
+            apiKey: providerConfig.apiKey,
+          })
+          const providerMessages = await buildProviderMessages({
+            provider: chatProvider,
+            model: providerConfig.model,
+            systemPrompt: SYSTEM_PROMPT,
+            history: prepared.history,
+            question: prepared.question,
+            budget: { window: 131072, maxOutput: 8192 },
+            toolsEnabled: initial.search ?? false,
+            signal: controller.signal,
+          })
+          reply = await runProviderReply({
+            provider: chatProvider,
+            model: providerConfig.model,
+            messages: providerMessages,
+            tools: initial.search ?? false,
+            toolApiKey: useSettings.getState().apiKey ?? '',
+            reply,
+            signal: controller.signal,
+            onChange: (next) => {
+              reply = next
+              if (document.visibilityState === 'hidden') {
+                flush()
+              } else {
+                frame ||= requestAnimationFrame(flush)
+              }
+            },
+            onDone: (next) => {
+              reply = next
+            },
+          })
+          break
+        }
         const messages = toRequestMessages(
           prepared.history,
           prepared.question,

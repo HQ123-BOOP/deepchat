@@ -7,9 +7,30 @@ export type Locale = 'zh-CN' | 'en-US'
 /** 主题偏好；默认跟随系统 */
 export type ThemePreference = 'light' | 'dark' | 'system'
 
+/** 对话提供商：deepseek 走原生协议（服务端联网工具），openai 走 OpenAI 兼容端点 */
+export type ProviderKind = 'deepseek' | 'openai'
+
+export type ProviderConfig = {
+  kind: ProviderKind
+  /** OpenAI 兼容端点的 baseUrl，例如 https://api.openai.com/v1 */
+  baseUrl: string
+  /** 该提供商的 Key；deepseek 时为空，复用 apiKey */
+  apiKey: string
+  /** 该提供商使用的模型名 */
+  model: string
+}
+
+const DEFAULT_PROVIDER: ProviderConfig = {
+  kind: 'deepseek',
+  baseUrl: 'https://api.openai.com/v1',
+  apiKey: '',
+  model: 'gpt-4o-mini',
+}
+
 /** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、深度思考与智能搜索开关、侧边栏收起状态 */
 type Settings = {
   apiKey: string | null
+  provider: ProviderConfig
   locale: Locale
   themePreference: ThemePreference
   location: UserLocation | null
@@ -21,6 +42,7 @@ type Settings = {
 
 const KEYS = {
   apiKey: 'chat-demo:api-key',
+  provider: 'chat-demo:provider',
   locale: 'chat-demo:locale',
   location: 'chat-demo:location',
   themePreference: 'chat-demo:theme-preference',
@@ -84,11 +106,31 @@ const initialThemePreference = (): ThemePreference => {
   return saved === 'light' || saved === 'dark' ? saved : 'system'
 }
 
+/** 读取提供商配置；损坏或字段缺失时回落到默认值 */
+const readProvider = (): ProviderConfig => {
+  const raw = read(KEYS.provider)
+  if (!raw) {
+    return DEFAULT_PROVIDER
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<ProviderConfig>
+    return {
+      kind: parsed.kind === 'openai' ? 'openai' : 'deepseek',
+      baseUrl: parsed.baseUrl?.trim() || DEFAULT_PROVIDER.baseUrl,
+      apiKey: parsed.apiKey ?? '',
+      model: parsed.model?.trim() || DEFAULT_PROVIDER.model,
+    }
+  } catch {
+    return DEFAULT_PROVIDER
+  }
+}
+
 /** 未保存过时使用服务端默认音色 stella（海星） */
 const initialTtsVoice = (): TtsVoice => (read(KEYS.ttsVoice) === 'tide' ? 'tide' : 'stella')
 
 export const useSettings = create<Settings>(() => ({
   apiKey: read(KEYS.apiKey),
+  provider: readProvider(),
   locale: initialLocale(),
   location: initialLocation(),
   themePreference: initialThemePreference(),
@@ -117,6 +159,12 @@ export const setThemePreference = (themePreference: ThemePreference) => {
 export const setTtsVoice = (ttsVoice: TtsVoice) => {
   write(KEYS.ttsVoice, ttsVoice)
   useSettings.setState({ ttsVoice })
+}
+
+export const setProviderConfig = (patch: Partial<ProviderConfig>) => {
+  const provider = { ...useSettings.getState().provider, ...patch }
+  write(KEYS.provider, JSON.stringify(provider))
+  useSettings.setState({ provider })
 }
 
 export const setApiKey = (apiKey: string | null) => {
