@@ -1,10 +1,19 @@
 .wrap {
+  /* 与会话页的 60px 顶栏同高：汉堡按钮和切换按钮处在同一水平线 */
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 5;
   display: flex;
+  align-items: center;
   justify-content: center;
-  padding: 10px 16px 4px;
+  height: 60px;
+  pointer-events: none;
 }
 
 .switch {
+  pointer-events: auto;
   display: inline-flex;
   gap: 2px;
   padding: 3px;

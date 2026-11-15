@@ -15,8 +15,9 @@ declare const styles: {
   readonly "collapsed": string;
   readonly "collapsedGroup": string;
   readonly "drawer": string;
+  readonly "drawerOpen": string;
   readonly "drawerMask": string;
+  readonly "drawerMaskOpen": string;
   readonly "mobile": string;
 };
 export = styles;
-

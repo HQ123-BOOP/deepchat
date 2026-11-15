@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Format, scan } from '@tauri-apps/plugin-barcode-scanner'
+import { Format, requestPermissions, scan } from '@tauri-apps/plugin-barcode-scanner'
 import { useTranslate } from '../../i18n/index.js'
 import { parsePairingUri } from '../../services/remote/bridgeClient.js'
 import { hasTauri } from '../../services/remote/secureStore.js'
@@ -24,6 +24,12 @@ const ConnectForm = () => {
   const onScan = async () => {
     setScanError(null)
     try {
+      // 相机权限要在真正的扫码之前显式申请，否则插件会直接抛错
+      const permission = await requestPermissions()
+      if (permission !== 'granted') {
+        setScanError(t('workScanPermissionDenied'))
+        return
+      }
       const result = await scan({ windowed: true, formats: [Format.QRCode] })
       const parsed = parsePairingUri(result.content)
       if (!parsed) {

@@ -1,3 +1,4 @@
+import clsx from 'clsx'
 import { useEffect } from 'react'
 import { useTranslate } from '../i18n/index.js'
 import { useSettings } from '../services/settings.js'
@@ -22,7 +23,7 @@ import { onUploadNotice } from '../services/attachments.js'
 import { Button } from '../components/base/Button.js'
 import { stopReadAloud } from '../services/speech/readAloud.js'
 import { CollapsedSider } from '../components/sider/CollapsedSider.js'
-import { closeMobileSider } from '../components/sider/mobileSiderState.js'
+import { closeMobileSider, useMobileSider } from '../components/sider/mobileSiderState.js'
 import { ModeSwitch } from '../components/mode/ModeSwitch.js'
 import { WorkView } from '../components/work/WorkView.js'
 import { useModeStore } from '../services/appMode.js'
@@ -55,6 +56,7 @@ export const App = () => {
   const activeId = useChatStore((state) => state.activeId)
   const mode = useModeStore((state) => state.mode)
   const workSessionId = useWorkStore((state) => state.activeSessionId)
+  const mobileSiderOpen = useMobileSider((state) => state.open) && isMobile
   // 进入任一会话后不再显示切换：工作会话不能回退成对话
   const showModeSwitch = mode === 'work' ? workSessionId === null : activeId === null
 
@@ -85,7 +87,7 @@ export const App = () => {
     <>
       <div ref={frameRef} className={styles.frame}>
         {isMobile ? <MobileSider /> : siderCollapsed ? null : <Sider />}
-        <main className={styles.main}>
+        <main className={clsx(styles.main, mobileSiderOpen && styles.mainPushed)}>
           {saveError ? (
             <div className={styles.saveError} role="alert">
               <span>{t('sessionSaveFailed')}</span>

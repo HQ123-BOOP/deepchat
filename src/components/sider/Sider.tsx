@@ -12,6 +12,7 @@ import { Modal } from '../base/Modal.js'
 import { showToast } from '../base/toastState.js'
 import { openSettings } from '../settings/settingsDialogState.js'
 import { closeMobileSider, useMobileSider } from './mobileSiderState.js'
+import { ConvertToWorkDialog } from './ConvertToWorkDialog.js'
 import { SessionItem } from './SessionItem.js'
 import styles from './Sider.module.css'
 
@@ -23,6 +24,7 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const [now, setNow] = useState(Date.now)
   const groups = useMemo(() => groupSessions(sessions, now, t), [sessions, now, t])
   const [deleting, setDeleting] = useState<SessionSummary | null>(null)
+  const [converting, setConverting] = useState<SessionSummary | null>(null)
   const [deletePending, setDeletePending] = useState(false)
 
   useEffect(() => {
@@ -85,6 +87,7 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
                   session={session}
                   active={session.id === activeId}
                   onDelete={() => setDeleting(session)}
+                  onConvert={() => setConverting(session)}
                 />
               ))}
             </div>
@@ -99,6 +102,9 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
           <span className={styles.settingsLabel}>{t('settings')}</span>
         </button>
       </div>
+      {converting ? (
+        <ConvertToWorkDialog session={converting} onClose={() => setConverting(null)} />
+      ) : null}
       {deleting ? (
         <Modal
           title={t('deleteSessionModalContentTitle')}
@@ -143,13 +149,14 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
 /** 移动端抽屉：浮在页面上方，点空白区域关闭。 */
 export const MobileSider = () => {
   const open = useMobileSider((state) => state.open)
-  if (!open) {
-    return null
-  }
+  // 抽屉常驻，靠 transform 过渡滑入；关闭时不可聚焦也不拦截点击
   return (
     <>
-      <div className={styles.drawerMask} onClick={closeMobileSider} />
-      <div className={styles.drawer}>
+      <div
+        className={clsx(styles.drawerMask, open && styles.drawerMaskOpen)}
+        onClick={closeMobileSider}
+      />
+      <div className={clsx(styles.drawer, open && styles.drawerOpen)} aria-hidden={!open}>
         <Sider mobile />
       </div>
     </>

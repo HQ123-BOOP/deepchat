@@ -3,7 +3,8 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  padding: 8px 16px 16px;
+  /* 顶部让出 60px 给悬浮的模式切换 */
+  padding: 64px 16px 16px;
   gap: 10px;
 }
 
