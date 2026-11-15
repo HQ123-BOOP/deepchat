@@ -77,6 +77,11 @@ export const App = () => {
   // 移动端选中会话、切换布局后收起抽屉
   useEffect(closeMobileSider, [activeId, isMobile])
 
+  // 启动即尝试恢复与电脑的连接，用户切到「工作」时通常已经连上
+  useEffect(() => {
+    void useWorkStore.getState().restore()
+  }, [])
+
   useEffect(() => {
     void initChat()
     // 首次打开先在设置里输入 API Key

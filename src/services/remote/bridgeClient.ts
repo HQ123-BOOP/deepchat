@@ -9,6 +9,8 @@ import { readServerSentEvents } from '../api/sse.js'
 export type BridgeSession = {
   sessionId: string
   cwd: string
+  /** 会话标题：DSH 的命名或第一条用户消息；可能为空 */
+  title?: string
 }
 
 export class BridgeError extends Error {

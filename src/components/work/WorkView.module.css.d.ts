@@ -27,5 +27,9 @@ declare const styles: {
   readonly "toolName": string;
   readonly "toolBody": string;
   readonly "sendButton": string;
+  readonly "welcome": string;
+  readonly "welcomeText": string;
+  readonly "chatHead": string;
+  readonly "chatTitle": string;
 };
 export = styles;

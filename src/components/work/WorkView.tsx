@@ -6,8 +6,6 @@ import { QrScanDialog } from './QrScanDialog.js'
 import { useWorkStore } from '../../services/remote/store.js'
 import styles from './WorkView.module.css'
 
-const shortId = (id: string) => (id.length > 18 ? `${id.slice(0, 18)}…` : id)
-
 /** 未连接：输入地址与配对码 */
 const ConnectForm = () => {
   const t = useTranslate()
@@ -84,56 +82,52 @@ const ConnectForm = () => {
   )
 }
 
-/** 已连接：会话列表，按工作目录分组 */
-const SessionList = () => {
+/** 已连接但还没选会话：工作模式的欢迎页 */
+const WorkWelcome = () => {
   const t = useTranslate()
+  const status = useWorkStore((state) => state.status)
   const sessions = useWorkStore((state) => state.sessions)
-  const host = useWorkStore((state) => state.host)
-  const port = useWorkStore((state) => state.port)
-  const openSession = useWorkStore((state) => state.openSession)
-  const refresh = useWorkStore((state) => state.refresh)
-  const disconnect = useWorkStore((state) => state.disconnect)
+  const startNewSession = useWorkStore((state) => state.startNewSession)
+  const [draft, setDraft] = useState('')
+  const ready = status === 'connected' && sessions.length > 0
 
-  const groups = new Map<string, typeof sessions>()
-  for (const session of sessions) {
-    const list = groups.get(session.cwd) ?? []
-    list.push(session)
-    groups.set(session.cwd, list)
+  const submit = () => {
+    const text = draft.trim()
+    if (!text || !ready) {
+      return
+    }
+    setDraft('')
+    void startNewSession(text)
   }
 
   return (
     <div className={styles.panel}>
-      <div className={styles.bar}>
-        <span>
-          {host}:{port} · {sessions.length}
-        </span>
-        <span>
-          <button type="button" className={styles.linkButton} onClick={() => void refresh()}>
-            {t('workRefresh')}
-          </button>
-          {' · '}
-          <button type="button" className={styles.linkButton} onClick={() => void disconnect()}>
-            {t('workDisconnect')}
-          </button>
-        </span>
+      <div className={styles.welcome}>
+        <div className={styles.welcomeText}>{t('workWelcome')}</div>
       </div>
-      <div className={styles.list}>
-        {sessions.length === 0 ? <div className={styles.hint}>{t('workNoSessions')}</div> : null}
-        {[...groups.entries()].map(([cwd, items]) => (
-          <div key={cwd}>
-            <div className={styles.group}>{cwd}</div>
-            {items.map((session) => (
-              <button
-                key={session.sessionId}
-                type="button"
-                className={styles.item}
-                onClick={() => openSession(session.sessionId)}
-              >
-                {shortId(session.sessionId)}
-              </button>
-            ))}
-          </div>
-        ))}
+      <div className={styles.composer}>
+        <textarea
+          rows={1}
+          placeholder={ready ? t('workMessagePlaceholder') : t('workConnectHint')}
+          value={draft}
+          disabled={!ready}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              submit()
+            }
+          }}
+        />
+        <button
+          type="button"
+          className={styles.sendButton}
+          disabled={!ready || !draft.trim()}
+          aria-label={t('send')}
+          onClick={submit}
+        >
+          ↑
+        </button>
       </div>
     </div>
   )
@@ -150,6 +144,10 @@ const SessionChat = () => {
   const send = useWorkStore((state) => state.send)
   const cancel = useWorkStore((state) => state.cancel)
   const closeSession = useWorkStore((state) => state.closeSession)
+  const sessions = useWorkStore((state) => state.sessions)
+  const activeSessionId = useWorkStore((state) => state.activeSessionId)
+  const title =
+    sessions.find((session) => session.sessionId === activeSessionId)?.title || t('sessionModeWork')
   const [draft, setDraft] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
   /** 是否跟随新消息贴底；用户上滑后停止跟随 */
@@ -202,9 +200,12 @@ const SessionChat = () => {
   return (
     <div className={styles.panel}>
       <div className={styles.bar}>
-        <button type="button" className={styles.linkButton} onClick={closeSession}>
-          ← {t('workBack')}
-        </button>
+        <span className={styles.chatHead}>
+          <button type="button" className={styles.linkButton} onClick={closeSession}>
+            ←
+          </button>
+          <span className={styles.chatTitle}>{title}</span>
+        </span>
         {streaming ? (
           <button type="button" className={styles.linkButton} onClick={() => void cancel()}>
             {t('workStop')}
@@ -294,5 +295,5 @@ export const WorkView = () => {
   if (status !== 'connected') {
     return <ConnectForm />
   }
-  return activeSessionId ? <SessionChat /> : <SessionList />
+  return activeSessionId ? <SessionChat /> : <WorkWelcome />
 }

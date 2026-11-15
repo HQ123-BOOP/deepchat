@@ -7,6 +7,7 @@
 import { create } from 'zustand'
 import {
   cancelSession,
+  createSession,
   listSessions,
   fetchHistory,
   pair,
@@ -57,6 +58,8 @@ type WorkActions = {
   loadOlder: () => Promise<void>
   send: (text: string) => Promise<void>
   cancel: () => Promise<void>
+  /** 在当前工作区新建一个会话并发送第一条消息 */
+  startNewSession: (text: string) => Promise<void>
 }
 
 let counter = 0
@@ -271,6 +274,35 @@ export const useWorkStore = create<WorkState & WorkActions>((set, get) => ({
       streaming: true,
     }))
     await sendMessage(host, port, token, activeSessionId, text)
+  },
+
+  startNewSession: async (text) => {
+    const { host, port, token, sessions } = get()
+    if (!token) {
+      return
+    }
+    const cwd = sessions[0]?.cwd
+    if (!cwd) {
+      set({ error: '还没有可用的工作区' })
+      return
+    }
+    try {
+      const created = await createSession(host, port, token, cwd)
+      set({
+        activeSessionId: created.sessionId,
+        messages: [],
+        hasMore: false,
+        streaming: true,
+      })
+      set((state) => ({
+        messages: [...state.messages, { id: nextId(), role: 'user', text, thinking: '', note: '' }],
+      }))
+      get().openSession(created.sessionId)
+      await sendMessage(host, port, token, created.sessionId, text)
+      void get().refresh()
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+    }
   },
 
   cancel: async () => {
