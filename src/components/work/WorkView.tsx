@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
+import { Format, scan } from '@tauri-apps/plugin-barcode-scanner'
 import { useTranslate } from '../../i18n/index.js'
+import { parsePairingUri } from '../../services/remote/bridgeClient.js'
+import { hasTauri } from '../../services/remote/secureStore.js'
 import { useWorkStore } from '../../services/remote/store.js'
 import styles from './WorkView.module.css'
 
@@ -16,6 +19,24 @@ const ConnectForm = () => {
   const [host, setHost] = useState(savedHost)
   const [port, setPort] = useState(String(savedPort))
   const [code, setCode] = useState('')
+  const [scanError, setScanError] = useState<string | null>(null)
+
+  const onScan = async () => {
+    setScanError(null)
+    try {
+      const result = await scan({ windowed: true, formats: [Format.QRCode] })
+      const parsed = parsePairingUri(result.content)
+      if (!parsed) {
+        setScanError(t('workScanUnrecognized'))
+        return
+      }
+      setHost(parsed.host)
+      setPort(String(parsed.port))
+      setCode(parsed.code)
+    } catch (error) {
+      setScanError(error instanceof Error ? error.message : t('workScanFailed'))
+    }
+  }
 
   return (
     <div className={styles.panel}>
@@ -49,6 +70,12 @@ const ConnectForm = () => {
           />
         </div>
       </div>
+      {hasTauri() ? (
+        <button type="button" className={styles.linkButton} onClick={() => void onScan()}>
+          {t('workScan')}
+        </button>
+      ) : null}
+      {scanError ? <div className={styles.error}>{scanError}</div> : null}
       {error ? <div className={styles.error}>{error}</div> : null}
       <button
         type="button"

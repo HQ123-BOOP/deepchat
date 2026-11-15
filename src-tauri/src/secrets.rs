@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+#[cfg(not(target_os = "android"))]
 const SERVICE: &str = "com.hq123boop.chatdemo";
 
 fn fallback_path(app: &tauri::AppHandle, key: &str) -> Result<PathBuf, String> {
