@@ -16,6 +16,17 @@
 
 .content {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 会话视图是 absolute inset:0 的，单独给它一层定位容器，避免盖住顶部的模式切换 */
+.viewport {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
 }

@@ -76,7 +76,9 @@ export const useWorkStore = create<WorkState & WorkActions>((set, get) => ({
       return
     }
     set({ token, status: 'connected' })
-    await get().refresh().catch((error: Error) => set({ error: error.message }))
+    await get()
+      .refresh()
+      .catch((error: Error) => set({ error: error.message }))
   },
 
   connect: async (host, port, code) => {
@@ -189,10 +191,7 @@ export const useWorkStore = create<WorkState & WorkActions>((set, get) => ({
       return
     }
     set((state) => ({
-      messages: [
-        ...state.messages,
-        { id: nextId(), role: 'user', text, thinking: '', note: '' },
-      ],
+      messages: [...state.messages, { id: nextId(), role: 'user', text, thinking: '', note: '' }],
       streaming: true,
     }))
     await sendMessage(host, port, token, activeSessionId, text)

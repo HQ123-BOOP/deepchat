@@ -95,7 +95,12 @@ export const sendMessage = async (
   )
 }
 
-export const cancelSession = async (host: string, port: number, token: string, sessionId: string) => {
+export const cancelSession = async (
+  host: string,
+  port: number,
+  token: string,
+  sessionId: string
+) => {
   await request<{ cancelled: boolean }>(
     `${base(host, port)}/v1/sessions/${encodeURIComponent(sessionId)}/cancel`,
     token,

@@ -26,6 +26,7 @@ import { closeMobileSider } from '../components/sider/mobileSiderState.js'
 import { ModeSwitch } from '../components/mode/ModeSwitch.js'
 import { WorkView } from '../components/work/WorkView.js'
 import { useModeStore } from '../services/appMode.js'
+import { useWorkStore } from '../services/remote/store.js'
 import { MobileSider, Sider } from '../components/sider/Sider.js'
 import styles from './App.module.css'
 
@@ -53,6 +54,9 @@ export const App = () => {
   )
   const activeId = useChatStore((state) => state.activeId)
   const mode = useModeStore((state) => state.mode)
+  const workSessionId = useWorkStore((state) => state.activeSessionId)
+  // 进入任一会话后不再显示切换：工作会话不能回退成对话
+  const showModeSwitch = mode === 'work' ? workSessionId === null : activeId === null
 
   usePreventPageScroll(isMobile)
 
@@ -97,44 +101,46 @@ export const App = () => {
           ) : null}
           <div className={styles.content}>
             {siderCollapsed ? <CollapsedSider /> : null}
-            <ModeSwitch />
-            {mode === 'work' ? (
-              <WorkView />
-            ) : !ready || (activeId !== null && !session) ? (
-              <div className={styles.loadingView}>
-                {isMobile ? <MobileHeader /> : null}
-                <div className={styles.loadingState} role="status" aria-live="polite">
-                  <span>
-                    {(!ready ? initError : sessionLoadError)
-                      ? t(!ready ? 'sessionListLoadFailed' : 'sessionLoadFailed')
-                      : t('sessionLoading')}
-                  </span>
-                  {(!ready ? initError : sessionLoadError) ? (
-                    <Button
-                      variant="outlined"
-                      size="m"
-                      onClick={() => {
-                        if (!ready) {
-                          void initChat()
-                        } else if (activeId !== null) {
-                          selectSession(activeId)
-                        }
-                      }}
-                    >
-                      {t('retry')}
-                    </Button>
-                  ) : null}
+            {showModeSwitch ? <ModeSwitch /> : null}
+            <div className={styles.viewport}>
+              {mode === 'work' ? (
+                <WorkView />
+              ) : !ready || (activeId !== null && !session) ? (
+                <div className={styles.loadingView}>
+                  {isMobile ? <MobileHeader /> : null}
+                  <div className={styles.loadingState} role="status" aria-live="polite">
+                    <span>
+                      {(!ready ? initError : sessionLoadError)
+                        ? t(!ready ? 'sessionListLoadFailed' : 'sessionLoadFailed')
+                        : t('sessionLoading')}
+                    </span>
+                    {(!ready ? initError : sessionLoadError) ? (
+                      <Button
+                        variant="outlined"
+                        size="m"
+                        onClick={() => {
+                          if (!ready) {
+                            void initChat()
+                          } else if (activeId !== null) {
+                            selectSession(activeId)
+                          }
+                        }}
+                      >
+                        {t('retry')}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            ) : session ? (
-              <SessionView
-                session={session}
-                streaming={streaming}
-                siderCollapsed={siderCollapsed}
-              />
-            ) : (
-              <Welcome />
-            )}
+              ) : session ? (
+                <SessionView
+                  session={session}
+                  streaming={streaming}
+                  siderCollapsed={siderCollapsed}
+                />
+              ) : (
+                <Welcome />
+              )}
+            </div>
           </div>
         </main>
         <SearchPanel />
