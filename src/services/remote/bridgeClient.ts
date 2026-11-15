@@ -81,6 +81,22 @@ export const createSession = async (host: string, port: number, token: string, c
   })
 }
 
+export type HistoryMessage = { role: 'user' | 'assistant'; text: string; time: number }
+
+/** 会话历史：桥接端从 DSH 的会话日志还原出来的消息 */
+export const fetchHistory = async (
+  host: string,
+  port: number,
+  token: string,
+  sessionId: string
+): Promise<HistoryMessage[]> => {
+  const result = await request<{ messages: HistoryMessage[] }>(
+    `${base(host, port)}/v1/sessions/${encodeURIComponent(sessionId)}/history`,
+    token
+  )
+  return result.messages ?? []
+}
+
 export const sendMessage = async (
   host: string,
   port: number,

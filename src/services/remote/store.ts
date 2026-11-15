@@ -8,6 +8,7 @@ import { create } from 'zustand'
 import {
   cancelSession,
   listSessions,
+  fetchHistory,
   pair,
   sendMessage,
   subscribe,
@@ -125,6 +126,27 @@ export const useWorkStore = create<WorkState & WorkActions>((set, get) => ({
     if (!token) {
       return
     }
+    // 先把历史拉下来，再订阅增量，否则空会话看起来像没有内容
+    void fetchHistory(host, port, token, sessionId)
+      .then((history) => {
+        if (get().activeSessionId !== sessionId) {
+          return
+        }
+        set((state) =>
+          state.messages.length > 0
+            ? state
+            : {
+                messages: history.map((message) => ({
+                  id: nextId(),
+                  role: message.role,
+                  text: message.text,
+                  thinking: '',
+                  note: '',
+                })),
+              }
+        )
+      })
+      .catch((error: Error) => set({ error: error.message }))
     unsubscribe = subscribe(
       host,
       port,
