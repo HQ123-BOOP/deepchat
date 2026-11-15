@@ -29,14 +29,10 @@ android {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
-            isJniDebuggable = true
             isMinifyEnabled = false
-            packaging {
-                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
-                jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
-                jniLibs.keepDebugSymbols.add("*/x86/*.so")
-                jniLibs.keepDebugSymbols.add("*/x86_64/*.so")
-            }
+            // 不保留 .so 的调试符号：日志符号让 APK 从 ~560 MB 涨到没必要的大小，
+            // 本地安装调试用不到。
+            isJniDebuggable = false
         }
         getByName("release") {
             optimization {
