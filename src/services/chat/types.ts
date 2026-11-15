@@ -112,12 +112,16 @@ export type Session = {
   updatedAt: number
   /** 包含所有分支的消息，按创建顺序存储。 */
   messages: Message[]
+  /** 会话所属模式：对话（默认）或已导入 DSH 的工作会话 */
+  mode?: 'chat' | 'work'
+  /** 转换为工作模式后对应的 DSH 会话 id */
+  dshSessionId?: string
   /** undefined 表示线性消息列表；null 表示空会话。 */
   rootMessageId?: string | null
 }
 
 /** 会话列表元数据；消息只在打开会话时加载。 */
-export type SessionSummary = Pick<Session, 'id' | 'title' | 'createdAt' | 'updatedAt'>
+export type SessionSummary = Pick<Session, 'id' | 'title' | 'createdAt' | 'updatedAt' | 'mode'>
 
 /** 显式提取字段，避免将完整会话的消息带进列表。 */
 export const toSessionSummary = (session: SessionSummary): SessionSummary => ({
@@ -125,4 +129,5 @@ export const toSessionSummary = (session: SessionSummary): SessionSummary => ({
   title: session.title,
   createdAt: session.createdAt,
   updatedAt: session.updatedAt,
+  mode: session.mode,
 })

@@ -97,7 +97,7 @@ const { getState: get, setState: set } = useChatStore
 const sortSessions = (sessions: SessionSummary[]) =>
   [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
 
-const getSession = (id: string) => {
+export const getSession = (id: string) => {
   const cache = get().sessionCache
   return Object.hasOwn(cache, id) ? cache[id] : undefined
 }
@@ -459,6 +459,23 @@ export const selectSession = (id: string) => {
     void ensureSessionLoaded(id)
     trimSessionCache()
   }
+}
+
+/** 标记会话已转换为工作模式，并记下它在 DSH 那边的会话 id */
+export const markSessionWork = async (id: string, dshSessionId: string) => {
+  const cached = getSession(id)
+  const session = cached ?? (await db.loadSession(id))
+  if (!session) {
+    return
+  }
+  const next: Session = { ...session, mode: 'work', dshSessionId }
+  updateSession(id, () => next)
+  set((state) => ({
+    sessions: state.sessions.map((summary) =>
+      summary.id === id ? { ...summary, mode: 'work' as const } : summary
+    ),
+  }))
+  await db.saveSession(next)
 }
 
 export const renameSession = (id: string, title: string) => {
@@ -1015,7 +1032,14 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
                 fileName: file.name,
                 signal: controller.signal,
               })
-              parts.push(['【附件：', file.name, '】', result.pages.map((page) => page.text).join('\n\n')].join('\n'))
+              parts.push(
+                [
+                  '【附件：',
+                  file.name,
+                  '】',
+                  result.pages.map((page) => page.text).join('\n\n'),
+                ].join('\n')
+              )
             }
             providerQuestion = {
               ...providerQuestion,

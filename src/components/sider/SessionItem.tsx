@@ -13,10 +13,12 @@ export const SessionItem = memo(function SessionItem({
   session,
   active,
   onDelete,
+  onConvert,
 }: {
   session: SessionSummary
   active: boolean
   onDelete: () => void
+  onConvert: () => void
 }) {
   const t = useTranslate()
   const [editing, setEditing] = useState(false)
@@ -55,7 +57,12 @@ export const SessionItem = memo(function SessionItem({
         closeMobileSider()
       }}
     >
-      <div className={styles.title}>{displayTitle}</div>
+      <div className={styles.title}>
+        {displayTitle}
+        <span className={styles.kind}>
+          {session.mode === 'work' ? t('sessionModeWork') : t('sessionModeChat')}
+        </span>
+      </div>
       <div className={styles.action} onClick={(event) => event.stopPropagation()}>
         <Menu
           options={[
@@ -65,6 +72,16 @@ export const SessionItem = memo(function SessionItem({
               icon: <IconEditOutline16 />,
               onSelect: () => setEditing(true),
             },
+            ...(session.mode === 'work'
+              ? []
+              : [
+                  {
+                    key: 'convert',
+                    label: t('convertToWork'),
+                    icon: <IconEditOutline16 />,
+                    onSelect: onConvert,
+                  },
+                ]),
             {
               key: 'delete',
               label: t('delete'),

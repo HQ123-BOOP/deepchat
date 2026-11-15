@@ -6,7 +6,7 @@ import { openMobileSider } from '../sider/mobileSiderState.js'
 import styles from './MobileHeader.module.css'
 
 /** 移动端顶栏：左侧菜单打开侧边栏；会话页再显示标题与开启新对话 */
-export const MobileHeader = ({ title }: { title?: string }) => {
+export const MobileHeader = ({ title, mode }: { title?: string; mode?: 'chat' | 'work' }) => {
   const t = useTranslate()
   return (
     <div className={styles.header}>
@@ -19,7 +19,12 @@ export const MobileHeader = ({ title }: { title?: string }) => {
       />
       {title === undefined ? null : (
         <>
-          <div className={styles.title}>{title}</div>
+          <div className={styles.title}>
+            {title}
+            <span className={styles.kind}>
+              {t(mode === 'work' ? 'sessionModeWork' : 'sessionModeChat')}
+            </span>
+          </div>
           <IconButton
             size="xl"
             tone="primary"

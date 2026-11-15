@@ -18,12 +18,21 @@ android {
     compileSdk = 37
     namespace = "com.hq123boop.chatdemo"
     defaultConfig {
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
+        // 局域网桥接走 http://<ip>:18923，release 也要允许明文
+        manifestPlaceholders["usesCleartextTraffic"] = "true"
         applicationId = "com.hq123boop.chatdemo"
         minSdk = 24
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    signingConfigs {
+        create("localDebug") {
+            storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -35,6 +44,7 @@ android {
             isJniDebuggable = false
         }
         getByName("release") {
+            signingConfig = signingConfigs.getByName("localDebug")
             optimization {
                enable = true
             }
