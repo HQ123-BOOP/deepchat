@@ -6,8 +6,12 @@
  * 块，因此本地工具调用也构造成同样的块，视图层不需要分支。
  */
 import { runAgent } from './agentLoop.js'
-import type { ProviderMessage } from '../providers/types.js'
-import type { ChatProvider } from '../providers/types.js'
+import type {
+  ChatProvider,
+  ProviderMessage,
+  ReasoningEffort,
+  ToolSchema,
+} from '../providers/types.js'
 import type { AssistantMessage, ReplyBlock } from './types.js'
 import type {
   ServerToolUseBlock,
@@ -20,13 +24,18 @@ export type ProviderReplyOptions = {
   provider: ChatProvider
   model: string
   messages: ProviderMessage[]
-  /** 是否声明联网工具 */
-  tools: boolean
-  /** 执行 search/fetch 用的 DeepSeek Key */
+  /** 本轮声明给模型的工具 */
+  tools?: ToolSchema[]
+  /** 执行 search/fetch/ocr 用的 DeepSeek Key */
   toolApiKey: string
+  /** ocr_file 按附件 id 读取本地原件 */
+  loadFile: (id: string) => Promise<Blob | undefined>
+  /** 本地 id → 文件名 */
+  fileNames?: Record<string, string>
   /** 初始回复（store 已插好空回复） */
   reply: AssistantMessage
   signal?: AbortSignal
+  reasoningEffort?: ReasoningEffort
   /** 每次块内容变化时回调，由调用方按帧合并刷新 */
   onChange: (reply: AssistantMessage) => void
   /** 回复结束时回调最终状态 */
@@ -70,13 +79,20 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
       messages: options.messages,
       tools: options.tools,
       toolApiKey: options.toolApiKey,
+      loadFile: options.loadFile,
+      fileNames: options.fileNames,
       signal: options.signal,
+      reasoningEffort: options.reasoningEffort,
     })) {
       if (event.type === 'text') {
         appendToLast('text', event.text)
       } else if (event.type === 'reasoning') {
         appendToLast('thinking', event.text)
       } else if (event.type === 'tool_start') {
+        // OCR 结果只回填给模型，不生成联网步骤卡片
+        if (event.call.name === 'ocr_file') {
+          continue
+        }
         let args: Record<string, unknown> = {}
         try {
           args = event.call.arguments ? (JSON.parse(event.call.arguments) as Record<string, unknown>) : {}
@@ -96,6 +112,9 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
         } as ServerToolUseBlock)
         options.onChange(reply)
       } else if (event.type === 'tool_result') {
+        if (event.call.name === 'ocr_file') {
+          continue
+        }
         if (event.call.name === 'read_url') {
           const source = event.sources[0]
           pushBlock({

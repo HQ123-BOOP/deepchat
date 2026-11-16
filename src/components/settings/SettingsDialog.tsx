@@ -20,6 +20,7 @@ import { useChatStore } from '../../services/chat/store.js'
 import { regionCodes, getRegionName, provinces } from '../../services/location.js'
 import {
   isChineseBrowser,
+  PI_APIS,
   setLocale,
   setProviderConfig,
   setLocation,
@@ -28,6 +29,7 @@ import {
   useSettings,
   type ThemePreference,
 } from '../../services/settings.js'
+import { getBuiltinProviders } from '@earendil-works/pi-ai/providers/all'
 import { useTranslate, type TranslationKey, type TranslationMessage } from '../../i18n/index.js'
 import { Button } from '../base/Button.js'
 import { Modal } from '../base/Modal.js'
@@ -301,7 +303,7 @@ const LocaleSetting = () => {
 }
 
 /** 朗读音色：stella（海星，女声）/ tide（暗潮，男声） */
-/** 对话提供商：DeepSeek 走原生协议，其他走 OpenAI 兼容端点（联网工具仍由 DeepSeek 提供） */
+/** 模型请求统一由 pi-ai 发出：协议、提供商、端点、Key 与模型名 */
 const ProviderSetting = () => {
   const t = useTranslate()
   const provider = useSettings((state) => state.provider)
@@ -309,52 +311,59 @@ const ProviderSetting = () => {
   return (
     <div className={styles.cell}>
       <div className={styles.label}>{t('settingsProvider')}</div>
+      <div className={styles.label} style={fieldStyle}>
+        {t('settingsProviderPiApi')}
+      </div>
       <div style={{ marginTop: 8 }}>
         <Select
-          ariaLabel={t('settingsProvider')}
-          value={provider.kind}
-          options={[
-            { value: 'deepseek', label: t('settingsProviderDeepseek') },
-            { value: 'openai', label: t('settingsProviderOpenai') },
-          ]}
-          onChange={(kind) => setProviderConfig({ kind })}
+          ariaLabel={t('settingsProviderPiApi')}
+          value={provider.piApi}
+          options={PI_APIS.map((api) => ({ value: api, label: api }))}
+          onChange={(piApi) => setProviderConfig({ piApi })}
         />
       </div>
-      {provider.kind === 'openai' ? (
-        <>
-          <div className={styles.apiKeyInput} style={fieldStyle}>
-            <input
-              placeholder={t('settingsProviderBaseUrl')}
-              autoComplete="off"
-              spellCheck={false}
-              value={provider.baseUrl}
-              onChange={(event) => setProviderConfig({ baseUrl: event.target.value })}
-            />
-          </div>
-          <div className={styles.apiKeyInput} style={fieldStyle}>
-            <input
-              type="password"
-              placeholder={t('settingsProviderApiKey')}
-              autoComplete="off"
-              spellCheck={false}
-              value={provider.apiKey}
-              onChange={(event) => setProviderConfig({ apiKey: event.target.value })}
-            />
-          </div>
-          <div className={styles.apiKeyInput} style={fieldStyle}>
-            <input
-              placeholder={t('settingsProviderModel')}
-              autoComplete="off"
-              spellCheck={false}
-              value={provider.model}
-              onChange={(event) => setProviderConfig({ model: event.target.value })}
-            />
-          </div>
-          <div className={styles.description} style={{ marginTop: 8 }}>
-            {t('settingsProviderHint')}
-          </div>
-        </>
-      ) : null}
+      <div className={styles.label} style={fieldStyle}>
+        {t('settingsProviderPiProvider')}
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <Select
+          ariaLabel={t('settingsProviderPiProvider')}
+          value={provider.piProvider}
+          options={getBuiltinProviders().map((name) => ({ value: name, label: name }))}
+          onChange={(piProvider) => setProviderConfig({ piProvider })}
+        />
+      </div>
+      <div className={styles.apiKeyInput} style={fieldStyle}>
+        <input
+          placeholder={t('settingsProviderPiBaseUrl')}
+          autoComplete="off"
+          spellCheck={false}
+          value={provider.piBaseUrl}
+          onChange={(event) => setProviderConfig({ piBaseUrl: event.target.value })}
+        />
+      </div>
+      <div className={styles.apiKeyInput} style={fieldStyle}>
+        <input
+          type="password"
+          placeholder={t('settingsProviderApiKey')}
+          autoComplete="off"
+          spellCheck={false}
+          value={provider.apiKey}
+          onChange={(event) => setProviderConfig({ apiKey: event.target.value })}
+        />
+      </div>
+      <div className={styles.apiKeyInput} style={fieldStyle}>
+        <input
+          placeholder={t('settingsProviderModel')}
+          autoComplete="off"
+          spellCheck={false}
+          value={provider.model}
+          onChange={(event) => setProviderConfig({ model: event.target.value })}
+        />
+      </div>
+      <div className={styles.description} style={{ marginTop: 8 }}>
+        {t('settingsProviderPiHint')}
+      </div>
     </div>
   )
 }

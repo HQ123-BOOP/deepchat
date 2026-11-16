@@ -4,8 +4,14 @@
  * DeepSeek 原生路径不需要它（联网由服务端在一个响应内完成）；这里只给
  * "其他提供商 + 标准 function tools" 使用。
  */
-import { runTool, TOOL_SCHEMAS, type ToolSource } from '../tools/registry.js'
-import type { ChatProvider, ProviderMessage, ToolCall } from '../providers/types.js'
+import { runTool, type ToolSource } from '../tools/registry.js'
+import type {
+  ChatProvider,
+  ProviderMessage,
+  ReasoningEffort,
+  ToolCall,
+  ToolSchema,
+} from '../providers/types.js'
 
 export type AgentEvent =
   | { type: 'text'; text: string }
@@ -19,14 +25,19 @@ export type AgentOptions = {
   model: string
   /** 会话历史（已按上下文策略组装） */
   messages: ProviderMessage[]
-  /** 是否声明联网工具；关闭时不发 tools */
-  tools: boolean
-  /** DeepSeek Key，用于执行 search/fetch；缺失时工具调用会失败 */
+  /** 本轮声明给模型的工具；由联网开关与本轮附件决定 */
+  tools?: ToolSchema[]
+  /** DeepSeek Key，用于执行 search/fetch/ocr；缺失时工具调用会失败 */
   toolApiKey: string
+  /** 按附件 id 读取本地原件，供 ocr_file 使用 */
+  loadFile: (id: string) => Promise<Blob | undefined>
+  /** 本地 id → 文件名 */
+  fileNames?: Record<string, string>
   signal?: AbortSignal
   /** 最多几轮工具调用，防止死循环 */
   maxSteps?: number
   temperature?: number
+  reasoningEffort?: ReasoningEffort
 }
 
 const DEFAULT_MAX_STEPS = 4
@@ -40,7 +51,7 @@ export async function* runAgent(
 ): AsyncGenerator<AgentEvent> {
   const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS
   const messages: ProviderMessage[] = [...options.messages]
-  const tools = options.tools ? TOOL_SCHEMAS : undefined
+  const tools = options.tools?.length ? options.tools : undefined
 
   for (let step = 0; step < maxSteps; step++) {
     const pending: ToolCall[] = []
@@ -49,7 +60,13 @@ export async function* runAgent(
 
     try {
       for await (const event of options.provider.stream(
-        { model: options.model, messages, tools, temperature: options.temperature },
+        {
+          model: options.model,
+          messages,
+          tools,
+          temperature: options.temperature,
+          reasoningEffort: options.reasoningEffort,
+        },
         options.signal
       )) {
         if (event.type === 'text') {
@@ -92,6 +109,8 @@ export async function* runAgent(
         const parsed = call.arguments ? (JSON.parse(call.arguments) as Record<string, unknown>) : {}
         const result = await runTool(call.name, parsed, {
           apiKey: options.toolApiKey,
+          loadFile: options.loadFile,
+          fileNames: options.fileNames,
           signal: options.signal,
         })
         content = result.content

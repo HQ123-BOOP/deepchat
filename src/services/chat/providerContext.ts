@@ -10,7 +10,12 @@
  * 与 harness 的差异：这里没有事件日志与“表面投影”，历史就是内存里的消息数组，
  * 因此摘要直接替换掉被压缩的那段历史。
  */
-import type { ChatProvider, ProviderMessage } from '../providers/types.js'
+import type {
+  ChatProvider,
+  ProviderImage,
+  ProviderMessage,
+  ToolSchema,
+} from '../providers/types.js'
 import { getReplyText } from './reply.js'
 import type { AssistantMessage, Message, UserMessage } from './types.js'
 
@@ -75,7 +80,12 @@ const messageTokens = (message: ProviderMessage): number => {
     )
     return estimateTokens(message.content) + calls + 8
   }
-  return estimateTokens(message.content) + 8
+  // 图片按 DeepSeek 的单图上限粗略计入预算
+  return (
+    estimateTokens(message.content) +
+    (message.role === 'user' ? (message.images?.length ?? 0) * 1024 : 0) +
+    8
+  )
 }
 
 export const countTokens = (messages: ProviderMessage[]): number =>
@@ -163,6 +173,9 @@ const summarize = async (
   return text.trim() ? `${SUMMARY_OPEN}\n${text.trim()}\n${SUMMARY_CLOSE}` : null
 }
 
+/** 供模型通过 ocr_file 工具引用的本地附件 */
+export type AttachmentRef = { id: string; name: string; isImage: boolean }
+
 export type BuildContextOptions = {
   provider: ChatProvider
   model: string
@@ -170,9 +183,28 @@ export type BuildContextOptions = {
   history: Message[]
   question: UserMessage
   budget: ContextBudget
-  /** 是否需要给模型补充工具使用提示 */
-  toolsEnabled: boolean
+  /** 本轮声明的工具，据此生成工具使用提示 */
+  tools?: ToolSchema[]
+  /** 本轮图片，内联成 image_url 块 */
+  images?: ProviderImage[]
+  /** 本轮附件清单，注入用户消息供工具按 file_id 取用 */
+  attachments?: AttachmentRef[]
   signal?: AbortSignal
+}
+
+/** 把附件 id 告诉模型；文档类附件由模型决定何时调 ocr_file，不预先 OCR */
+const attachmentNote = (files: AttachmentRef[]): string => {
+  if (files.length === 0) {
+    return ''
+  }
+  const lines = files.map(
+    (file) => `- ${file.name}（file_id: ${file.id}${file.isImage ? '，图片已随消息附上' : ''}）`
+  )
+  return [
+    '【本轮附件】',
+    ...lines,
+    '需要读取文档内容或图片文字时，调用 ocr_file 工具并传入对应的 file_id。',
+  ].join('\n')
 }
 
 /**
@@ -188,7 +220,9 @@ export const buildProviderMessages = async ({
   history,
   question,
   budget,
-  toolsEnabled,
+  tools,
+  images,
+  attachments,
   signal,
 }: BuildContextOptions): Promise<ProviderMessage[]> => {
   const rounds = usableRounds(history)
@@ -208,15 +242,22 @@ export const buildProviderMessages = async ({
     )
 
   const system: ProviderMessage = { role: 'system', content: systemPrompt }
-  const toolHint: ProviderMessage | null = toolsEnabled
+  const toolHint: ProviderMessage | null = tools?.length
     ? {
         role: 'system',
-        content:
-          '你可以调用 web_search 和 read_url 获取实时网页信息。事实性问题先搜索再回答；引用搜索结果时给出 URL。',
+        content: [
+          `你可以调用 ${tools.map((tool) => tool.name).join('、')} 获取外部信息或读取本轮附件。`,
+          '事实性问题先查证再回答；引用搜索结果时给出 URL；需要文档内容时先用 ocr_file 读取。',
+        ].join(''),
       }
     : null
+  const note = attachmentNote(attachments ?? [])
   const head = (messages: ProviderMessage[]): ProviderMessage[] => {
-    messages.push({ role: 'user', content: question.content })
+    messages.push({
+      role: 'user',
+      content: [question.content, note].filter(Boolean).join('\n\n'),
+      ...(images?.length ? { images } : {}),
+    })
     return messages
   }
 

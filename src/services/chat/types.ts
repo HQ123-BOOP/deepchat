@@ -1,7 +1,6 @@
 import type { TranslationMessage } from '../../i18n/index.js'
 import type { ApiErrorKind } from '../api/client.js'
 import type {
-  ChatModel,
   MessageUsage,
   ServerToolBlock,
   StopDetails,
@@ -75,8 +74,8 @@ export type AssistantMessage = MessageBranch & {
   id: string
   role: 'assistant'
   createdAt: number
-  /** 未记录模型时为 null，续写使用当前默认模型。 */
-  model: ChatModel | null
+  /** 未记录模型时为 null，续写使用当前设置的模型。 */
+  model: string | null
   /** 请求时是否开启深度思考 */
   thinking?: boolean
   /** 请求时是否声明 deepseek_web_search；关闭时仍声明 deepseek_read_url */
@@ -112,9 +111,9 @@ export type Session = {
   updatedAt: number
   /** 包含所有分支的消息，按创建顺序存储。 */
   messages: Message[]
-  /** 会话所属模式：对话（默认）或已导入 DSH 的工作会话 */
+  /** 历史字段：早期版本的工作会话标记，仅为兼容已保存的旧会话保留，不再写入 */
   mode?: 'chat' | 'work'
-  /** 转换为工作模式后对应的 DSH 会话 id */
+  /** 历史字段：早期版本导入 DSH 后的会话 id，仅为兼容已保存的旧会话保留 */
   dshSessionId?: string
   /** undefined 表示线性消息列表；null 表示空会话。 */
   rootMessageId?: string | null

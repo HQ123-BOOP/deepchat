@@ -20,6 +20,9 @@ export type ToolSchema = {
   parameters: JsonSchema
 }
 
+/** 内联图片：base64 数据（不含 data: 前缀）与 MIME 类型 */
+export type ProviderImage = { data: string; mimeType: string }
+
 /** 模型请求发起的一次工具调用；arguments 是原始 JSON 字符串（可能被流式分片） */
 export type ToolCall = {
   id: string
@@ -29,9 +32,12 @@ export type ToolCall = {
 
 export type ProviderMessage =
   | { role: 'system'; content: string }
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string; images?: ProviderImage[] }
   | { role: 'assistant'; content: string; toolCalls?: ToolCall[]; reasoning?: string }
   | { role: 'tool'; toolCallId: string; name: string; content: string }
+
+/** 推理档位：off 关闭思考，其余对应各家的 reasoning_effort */
+export type ReasoningEffort = 'off' | 'low' | 'high' | 'max'
 
 export type ProviderRequest = {
   model: string
@@ -40,6 +46,7 @@ export type ProviderRequest = {
   /** 0 表示不限制 */
   maxTokens?: number
   temperature?: number
+  reasoningEffort?: ReasoningEffort
 }
 
 export type StopReason = 'stop' | 'tool_calls' | 'length' | 'error'

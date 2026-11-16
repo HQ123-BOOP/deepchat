@@ -7,27 +7,39 @@ export type Locale = 'zh-CN' | 'en-US'
 /** 主题偏好；默认跟随系统 */
 export type ThemePreference = 'light' | 'dark' | 'system'
 
-/** 对话提供商：deepseek 走原生协议（服务端联网工具），openai 走 OpenAI 兼容端点 */
-/** 推理强度：对应 API 的 output_config.effort，off 表示关闭思考 */
+/** 推理强度：映射为标准 Chat API 的 reasoning_effort，off 表示关闭思考 */
 export type ReasoningEffort = 'off' | 'low' | 'high' | 'max'
 
-export type ProviderKind = 'deepseek' | 'openai'
+/** pi-ai 支持的协议；provider 由设置里另行选择 */
+export const PI_APIS = [
+  'openai-completions',
+  'openai-responses',
+  'azure-openai-responses',
+  'anthropic-messages',
+  'google-generative-ai',
+  'mistral-conversations',
+] as const
 
+/** 所有模型请求统一由 pi-ai 发出；联网工具另用 settings.apiKey 调用工具 API */
 export type ProviderConfig = {
-  kind: ProviderKind
-  /** OpenAI 兼容端点的 baseUrl，例如 https://api.openai.com/v1 */
-  baseUrl: string
-  /** 该提供商的 Key；deepseek 时为空，复用 apiKey */
+  /** 模型提供商的 Key；留空时复用 settings.apiKey */
   apiKey: string
   /** 该提供商使用的模型名 */
   model: string
+  /** pi-ai：提供商标识，用于自动适配各家兼容差异 */
+  piProvider: string
+  /** pi-ai：协议标识，见 PI_APIS */
+  piApi: string
+  /** pi-ai：独立端点，留空按 provider / 协议用官方默认值 */
+  piBaseUrl: string
 }
 
 const DEFAULT_PROVIDER: ProviderConfig = {
-  kind: 'deepseek',
-  baseUrl: 'https://api.openai.com/v1',
   apiKey: '',
-  model: 'gpt-4o-mini',
+  model: 'deepseek-flash',
+  piProvider: 'deepseek',
+  piApi: 'openai-completions',
+  piBaseUrl: '',
 }
 
 /** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、深度思考与智能搜索开关、侧边栏收起状态 */
@@ -117,12 +129,17 @@ const readProvider = (): ProviderConfig => {
     return DEFAULT_PROVIDER
   }
   try {
-    const parsed = JSON.parse(raw) as Partial<ProviderConfig>
+    const parsed = JSON.parse(raw) as Partial<ProviderConfig> & { kind?: string }
+    // 旧版三分流配置里的模型名属于另一条路径，统一后直接回到默认的标准 Chat API 配置
+    if (parsed.kind && parsed.kind !== 'pi') {
+      return DEFAULT_PROVIDER
+    }
     return {
-      kind: parsed.kind === 'openai' ? 'openai' : 'deepseek',
-      baseUrl: parsed.baseUrl?.trim() || DEFAULT_PROVIDER.baseUrl,
       apiKey: parsed.apiKey ?? '',
       model: parsed.model?.trim() || DEFAULT_PROVIDER.model,
+      piProvider: parsed.piProvider?.trim() || DEFAULT_PROVIDER.piProvider,
+      piApi: parsed.piApi?.trim() || DEFAULT_PROVIDER.piApi,
+      piBaseUrl: parsed.piBaseUrl ?? '',
     }
   } catch {
     return DEFAULT_PROVIDER
