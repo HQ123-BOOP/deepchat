@@ -33,7 +33,15 @@ export type ToolCall = {
 export type ProviderMessage =
   | { role: 'system'; content: string }
   | { role: 'user'; content: string; images?: ProviderImage[] }
-  | { role: 'assistant'; content: string; toolCalls?: ToolCall[]; reasoning?: string }
+  | {
+      role: 'assistant'
+      content: string
+      toolCalls?: ToolCall[]
+      /** 该轮的思考内容；随消息回传，不能丢弃 */
+      reasoning?: string
+      /** 思考签名，pi-ai 用它决定写回哪个 reasoning 字段（如 reasoning_content） */
+      reasoningSignature?: string
+    }
   | { role: 'tool'; toolCallId: string; name: string; content: string }
 
 /** 推理档位：off 关闭思考，其余对应各家的 reasoning_effort */
@@ -55,6 +63,8 @@ export type StopReason = 'stop' | 'tool_calls' | 'length' | 'error'
 export type ProviderEvent =
   | { type: 'text'; text: string }
   | { type: 'reasoning'; text: string }
+  /** 思考块结束时到达的签名；缺失时该段思考无法在下一轮原样回传 */
+  | { type: 'reasoning_signature'; signature: string }
   | { type: 'tool_call'; call: ToolCall }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   | { type: 'done'; stopReason: StopReason; error?: string }

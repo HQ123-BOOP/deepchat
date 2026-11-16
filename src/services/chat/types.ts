@@ -39,7 +39,7 @@ export type UserMessage = MessageBranch & {
   createdAt: number
 }
 
-/** 思考块：thinking_delta 累积，签名随 signature_delta 到达；历史轮次的思考服务端会丢弃，不回传 */
+/** 思考块：流式增量累积，签名随块结束到达；历史轮次按签名原样回传给模型 */
 export type ThinkingPart = {
   type: 'thinking'
   thinking: string

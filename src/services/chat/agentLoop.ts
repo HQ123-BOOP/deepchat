@@ -16,6 +16,7 @@ import type {
 export type AgentEvent =
   | { type: 'text'; text: string }
   | { type: 'reasoning'; text: string }
+  | { type: 'reasoning_signature'; signature: string }
   | { type: 'tool_start'; call: ToolCall }
   | { type: 'tool_result'; call: ToolCall; sources: ToolSource[]; ok: boolean; error?: string }
   | { type: 'done'; stopReason: 'stop' | 'length' | 'tool_limit' | 'error'; error?: string }
@@ -57,6 +58,9 @@ export async function* runAgent(
     const pending: ToolCall[] = []
     let finish: 'stop' | 'length' | 'tool_calls' | 'error' = 'stop'
     let text = ''
+    // 这一轮的思考与签名；必须随 assistant 消息回传，否则工具续轮会丢推理
+    let reasoning = ''
+    let reasoningSignature = ''
 
     try {
       for await (const event of options.provider.stream(
@@ -73,7 +77,11 @@ export async function* runAgent(
           text += event.text
           yield { type: 'text', text: event.text }
         } else if (event.type === 'reasoning') {
+          reasoning += event.text
           yield { type: 'reasoning', text: event.text }
+        } else if (event.type === 'reasoning_signature') {
+          reasoningSignature = event.signature
+          yield { type: 'reasoning_signature', signature: event.signature }
         } else if (event.type === 'tool_call') {
           pending.push(event.call)
         } else if (event.type === 'done') {
@@ -99,7 +107,13 @@ export async function* runAgent(
     }
 
     // 把这一轮的助手消息（可能含正文 + 工具调用）写入历史，再逐个执行工具
-    messages.push({ role: 'assistant', content: text, toolCalls: pending })
+    messages.push({
+      role: 'assistant',
+      content: text,
+      toolCalls: pending,
+      ...(reasoning ? { reasoning } : {}),
+      ...(reasoningSignature ? { reasoningSignature } : {}),
+    })
     for (const call of pending) {
       yield { type: 'tool_start', call }
       let content: string

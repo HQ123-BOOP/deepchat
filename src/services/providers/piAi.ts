@@ -187,7 +187,15 @@ const toContext = (request: ProviderRequest, config: PiAiConfig): Context => {
       case 'assistant': {
         const content: AssistantMessage['content'] = []
         if (message.reasoning) {
-          content.push({ type: 'thinking', thinking: message.reasoning })
+          content.push({
+            type: 'thinking',
+            thinking: message.reasoning,
+            // 签名决定 pi-ai 是否把这段思考写回 reasoning_content 等字段；
+            // 没有签名时部分协议会降级成普通文本或直接丢弃
+            ...(message.reasoningSignature
+              ? { thinkingSignature: message.reasoningSignature }
+              : {}),
+          })
         }
         if (message.content) {
           content.push({ type: 'text', text: message.content })
@@ -341,6 +349,14 @@ export const createPiAiProvider = (config: PiAiConfig): ChatProvider => ({
         case 'thinking_delta':
           yield { type: 'reasoning', text: event.delta }
           break
+        case 'thinking_end': {
+          // 签名在思考块结束时才完整（Anthropic 走 signature_delta 累积）
+          const block = event.partial.content[event.contentIndex]
+          if (block?.type === 'thinking' && block.thinkingSignature) {
+            yield { type: 'reasoning_signature', signature: block.thinkingSignature }
+          }
+          break
+        }
         case 'toolcall_end':
           yield {
             type: 'tool_call',

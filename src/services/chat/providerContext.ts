@@ -17,7 +17,7 @@ import type {
   ToolSchema,
 } from '../providers/types.js'
 import { getReplyText } from './reply.js'
-import type { AssistantMessage, Message, UserMessage } from './types.js'
+import type { AssistantMessage, Message, ThinkingPart, UserMessage } from './types.js'
 
 /** 上下文预算：窗口、输出预留与安全余量 */
 export type ContextBudget = {
@@ -78,7 +78,8 @@ const messageTokens = (message: ProviderMessage): number => {
       (sum, call) => sum + estimateTokens(call.name) + estimateTokens(call.arguments),
       0
     )
-    return estimateTokens(message.content) + calls + 8
+    // 思考也会随消息回传，计入预算
+    return estimateTokens(message.content) + estimateTokens(message.reasoning ?? '') + calls + 8
   }
   // 图片按 DeepSeek 的单图上限粗略计入预算
   return (
@@ -140,9 +141,20 @@ const toRoundMessages = (user: UserMessage, reply: AssistantMessage): ProviderMe
     .filter((block) => block.type === 'text')
     .map((block) => (block as { text: string }).text)
     .join('\n\n')
+  // 历史轮次同样回传思考与签名：DeepSeek 需要 reasoning_content 才能续接推理
+  const thinking = reply.blocks.filter(
+    (block): block is ThinkingPart => block.type === 'thinking' && block.thinking.trim() !== ''
+  )
+  const reasoning = thinking.map((block) => block.thinking).join('\n\n')
+  const reasoningSignature = thinking.find((block) => block.signature)?.signature
   return [
     { role: 'user', content: user.content },
-    { role: 'assistant', content: text },
+    {
+      role: 'assistant',
+      content: text,
+      ...(reasoning ? { reasoning } : {}),
+      ...(reasoningSignature ? { reasoningSignature } : {}),
+    },
   ]
 }
 

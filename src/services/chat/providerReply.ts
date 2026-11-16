@@ -72,6 +72,23 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
     options.onChange(reply)
   }
 
+  /** 把签名挂到最近一个思考块；历史轮次据此原样回传推理 */
+  const attachReasoningSignature = (signature: string) => {
+    for (let index = reply.blocks.length - 1; index >= 0; index--) {
+      const block = reply.blocks[index]
+      if (block.type !== 'thinking') {
+        continue
+      }
+      const next = { ...block, signature }
+      reply = {
+        ...reply,
+        blocks: [...reply.blocks.slice(0, index), next, ...reply.blocks.slice(index + 1)],
+      }
+      options.onChange(reply)
+      return
+    }
+  }
+
   try {
     for await (const event of runAgent({
       provider: options.provider,
@@ -88,6 +105,8 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
         appendToLast('text', event.text)
       } else if (event.type === 'reasoning') {
         appendToLast('thinking', event.text)
+      } else if (event.type === 'reasoning_signature') {
+        attachReasoningSignature(event.signature)
       } else if (event.type === 'tool_start') {
         // OCR 结果只回填给模型，不生成联网步骤卡片
         if (event.call.name === 'ocr_file') {
