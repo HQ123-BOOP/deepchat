@@ -276,35 +276,3 @@
   list-style: none;
 }
 
-.workItem {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 100%;
-  padding: 8px 12px;
-  border: none;
-  border-radius: 10px;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  color: var(--dsw-alias-label-primary);
-
-  &:hover {
-    background-color: var(--dsw-alias-interactive-bg-hover);
-  }
-}
-
-.workTitle {
-  overflow: hidden;
-  font-size: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workCwd {
-  overflow: hidden;
-  font-size: 11px;
-  color: var(--dsw-alias-label-caption);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}

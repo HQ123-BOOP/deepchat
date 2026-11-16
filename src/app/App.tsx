@@ -24,10 +24,6 @@ import { Button } from '../components/base/Button.js'
 import { stopReadAloud } from '../services/speech/readAloud.js'
 import { CollapsedSider } from '../components/sider/CollapsedSider.js'
 import { closeMobileSider, useMobileSider } from '../components/sider/mobileSiderState.js'
-import { ModeSwitch } from '../components/mode/ModeSwitch.js'
-import { WorkView } from '../components/work/WorkView.js'
-import { useModeStore } from '../services/appMode.js'
-import { useWorkStore } from '../services/remote/store.js'
 import { MobileSider, Sider } from '../components/sider/Sider.js'
 import styles from './App.module.css'
 
@@ -54,11 +50,7 @@ export const App = () => {
     state.activeId === null ? false : Object.hasOwn(state.streaming, state.activeId)
   )
   const activeId = useChatStore((state) => state.activeId)
-  const mode = useModeStore((state) => state.mode)
-  const workSessionId = useWorkStore((state) => state.activeSessionId)
   const mobileSiderOpen = useMobileSider((state) => state.open) && isMobile
-  // 进入任一会话后不再显示切换：工作会话不能回退成对话
-  const showModeSwitch = mode === 'work' ? workSessionId === null : activeId === null
 
   usePreventPageScroll(isMobile)
 
@@ -76,11 +68,6 @@ export const App = () => {
   useEffect(stopReadAloud, [activeId])
   // 移动端选中会话、切换布局后收起抽屉
   useEffect(closeMobileSider, [activeId, isMobile])
-
-  // 启动即尝试恢复与电脑的连接，用户切到「工作」时通常已经连上
-  useEffect(() => {
-    void useWorkStore.getState().restore()
-  }, [])
 
   useEffect(() => {
     void initChat()
@@ -108,11 +95,8 @@ export const App = () => {
           ) : null}
           <div className={styles.content}>
             {siderCollapsed ? <CollapsedSider /> : null}
-            {showModeSwitch ? <ModeSwitch /> : null}
             <div className={styles.viewport}>
-              {mode === 'work' ? (
-                <WorkView />
-              ) : !ready || (activeId !== null && !session) ? (
+              {!ready || (activeId !== null && !session) ? (
                 <div className={styles.loadingView}>
                   {isMobile ? <MobileHeader /> : null}
                   <div className={styles.loadingState} role="status" aria-live="polite">

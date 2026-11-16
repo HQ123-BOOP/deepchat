@@ -23,7 +23,7 @@ export const SessionView = ({
   return (
     <div className={styles.view}>
       {isMobile ? (
-        <MobileHeader title={title} mode={session.mode} />
+        <MobileHeader title={title} />
       ) : (
         <div className={styles.header}>
           <div className={clsx(styles.title, siderCollapsed && styles.withCollapsedSider)}>

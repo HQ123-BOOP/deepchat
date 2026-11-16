@@ -12,9 +12,6 @@ import { Modal } from '../base/Modal.js'
 import { showToast } from '../base/toastState.js'
 import { openSettings } from '../settings/settingsDialogState.js'
 import { closeMobileSider, useMobileSider } from './mobileSiderState.js'
-import { setMode } from '../../services/appMode.js'
-import { useWorkStore } from '../../services/remote/store.js'
-import { ConvertToWorkDialog } from './ConvertToWorkDialog.js'
 import { SessionItem } from './SessionItem.js'
 import styles from './Sider.module.css'
 
@@ -25,12 +22,7 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const activeId = useChatStore((state) => state.activeId)
   const [now, setNow] = useState(Date.now)
   const groups = useMemo(() => groupSessions(sessions, now, t), [sessions, now, t])
-  const workToken = useWorkStore((state) => Boolean(state.token))
-  const workSessions = useWorkStore((state) => state.sessions)
-  const activeWorkId = useWorkStore((state) => state.activeSessionId)
-  const openWorkSession = useWorkStore((state) => state.openSession)
   const [deleting, setDeleting] = useState<SessionSummary | null>(null)
-  const [converting, setConverting] = useState<SessionSummary | null>(null)
   const [deletePending, setDeletePending] = useState(false)
 
   useEffect(() => {
@@ -95,42 +87,10 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
                     session={session}
                     active={session.id === activeId}
                     onDelete={() => setDeleting(session)}
-                    onConvert={() => setConverting(session)}
                   />
                 ))}
               </div>
             ))}
-          </details>
-          <details className={styles.group} open>
-            <summary className={styles.groupTitle}>{t('siderWorkGroup')}</summary>
-            {workToken ? (
-              workSessions.length > 0 ? (
-                workSessions.map((session) => (
-                  <button
-                    key={session.sessionId}
-                    type="button"
-                    className={clsx(
-                      styles.workItem,
-                      session.sessionId === activeWorkId && styles.active
-                    )}
-                    onClick={() => {
-                      setMode('work')
-                      openWorkSession(session.sessionId)
-                      closeMobileSider()
-                    }}
-                  >
-                    <span className={styles.workTitle}>
-                      {session.title || session.cwd.split(/[\\/]/).at(-1) || session.sessionId}
-                    </span>
-                    <span className={styles.workCwd}>{session.cwd}</span>
-                  </button>
-                ))
-              ) : (
-                <div className={styles.sectionHeader}>{t('siderWorkEmpty')}</div>
-              )
-            ) : (
-              <div className={styles.sectionHeader}>{t('siderWorkDisconnected')}</div>
-            )}
           </details>
         </div>
       </div>
@@ -142,9 +102,6 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
           <span className={styles.settingsLabel}>{t('settings')}</span>
         </button>
       </div>
-      {converting ? (
-        <ConvertToWorkDialog session={converting} onClose={() => setConverting(null)} />
-      ) : null}
       {deleting ? (
         <Modal
           title={t('deleteSessionModalContentTitle')}

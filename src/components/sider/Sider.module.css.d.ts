@@ -21,8 +21,5 @@ declare const styles: {
   readonly "mobile": string;
   readonly "group": string;
   readonly "groupTitle": string;
-  readonly "workItem": string;
-  readonly "workTitle": string;
-  readonly "workCwd": string;
 };
 export = styles;

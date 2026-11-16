@@ -85,37 +85,3 @@
   }
 }
 
-/* 标题右侧的模式标注：灰色小字 */
-.kind {
-  flex-shrink: 0;
-  margin-left: 8px;
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--dsw-alias-label-caption);
-}
-
-.convertBody {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-primary);
-}
-
-.convertWarning {
-  margin: 0;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.convertError {
-  margin: 0;
-  color: var(--dsw-alias-state-error-primary);
-}
-
-.convertLabel {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--dsw-alias-label-secondary);
-}
