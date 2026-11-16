@@ -1,9 +1,9 @@
 /**
- * 提供给模型的"标准工具"定义与执行器。
+ * 提供给模型的标准工具定义与执行器。
  *
- * DeepSeek 的原生路径里，搜索/抓取由服务端在同一个响应内完成（server_tool_use），
- * 客户端不经手。换成其他提供商后没有这套服务端工具，于是把它们声明成普通
- * function，由客户端调用 DeepSeek 工具 API 执行——能力等价，只是多了几次往返。
+ * 搜索、抓取与 OCR 都是普通 function tool：模型发起调用，客户端 ReAct 循环
+ * 调 DeepSeek 工具 API 执行，结果回填后再请求一次。
+ * 文案对齐 DSH 的 web 工具：描述保持简短，外部内容的不可信提示放在系统提示里。
  */
 import { fetchPage, ocrFile, searchWeb, type OcrPurpose, type SearchResult } from './deepseekTools.js'
 import type { JsonSchema, ToolSchema } from '../providers/types.js'
@@ -14,18 +14,18 @@ export type ToolName = 'web_search' | 'read_url' | 'ocr_file'
 export const WEB_TOOL_SCHEMAS: ToolSchema[] = [
   {
     name: 'web_search',
-    description:
-      '搜索互联网网页。返回若干条结果，每条含标题、URL 和摘要。需要最新信息、事实核查或用户明确要求联网时使用。',
+    description: 'Search the web for current information. Returns a list of source URLs with titles and snippets.',
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: '搜索词，1～128 个字符。支持 site:、-site:、-词、lang:、after:、before: 等语法。',
+          description:
+            'The search query, 1–128 characters. Supports site:, -site:, -term, lang:, after: and before: filters.',
         },
         count: {
           type: 'integer',
-          description: '返回条数，1～50，默认 10。',
+          description: 'Number of results to return, 1–50. Defaults to 10.',
           minimum: 1,
           maximum: 50,
         },
@@ -36,12 +36,11 @@ export const WEB_TOOL_SCHEMAS: ToolSchema[] = [
   },
   {
     name: 'read_url',
-    description:
-      '抓取单个网页并返回 Markdown 正文。需要阅读搜索结果里的具体页面、或用户给出链接时使用。',
+    description: 'Fetch the content of a specific HTTP(S) URL and return it decoded to text.',
     parameters: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: '要抓取的网页地址，必须带 host 的 http/https URL。' },
+        url: { type: 'string', description: 'The HTTP(S) URL to fetch.' },
       },
       required: ['url'],
       additionalProperties: false,
