@@ -27,10 +27,12 @@ export const PI_APIS = [
 export const INPUT_MODALITIES = ['text', 'image', 'audio', 'video'] as const
 export type InputModality = (typeof INPUT_MODALITIES)[number]
 
-/** 所有模型请求统一由 pi-ai 发出；工具 API 与模型共用 provider.apiKey */
+/** 所有模型请求统一由 pi-ai 发出；DeepSeek 的 OCR、搜索等工具另用独立的 Key */
 export type ProviderConfig = {
-  /** 模型与工具 API 共用的 Key；留空时回退旧版单独保存的 settings.apiKey */
+  /** 模型请求用的 Key */
   apiKey: string
+  /** DeepSeek 工具服务（OCR、联网搜索、网页抓取）的 Key；换模型后仍可用 */
+  serviceApiKey: string
   /** 该提供商使用的模型名 */
   model: string
   /** pi-ai：提供商标识，用于自动适配各家兼容差异 */
@@ -49,6 +51,7 @@ export type ProviderConfig = {
 
 const DEFAULT_PROVIDER: ProviderConfig = {
   apiKey: '',
+  serviceApiKey: '',
   model: 'deepseek-flash',
   piProvider: 'deepseek',
   piApi: 'openai-completions',
@@ -167,6 +170,7 @@ const readProvider = (): ProviderConfig => {
     }
     return {
       apiKey: parsed.apiKey ?? '',
+      serviceApiKey: parsed.serviceApiKey ?? '',
       model: parsed.model?.trim() || DEFAULT_PROVIDER.model,
       piProvider: parsed.piProvider?.trim() || DEFAULT_PROVIDER.piProvider,
       piApi: parsed.piApi?.trim() || DEFAULT_PROVIDER.piApi,

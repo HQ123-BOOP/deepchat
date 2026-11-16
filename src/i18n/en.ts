@@ -198,6 +198,7 @@ export const en = {
   modalityVideo: 'Video',
   settingsProviderPiBaseUrl: 'API Base URL',
   settingsProviderApiKey: 'API Key',
+  settingsProviderServiceApiKey: 'DeepSeek service key (OCR, web search, page fetch)',
   settingsProviderContextWindow: 'Context window',
   settingsProviderMaxTokens: 'Max output',
   settingsAsrModel: 'ASR speech model',

@@ -820,6 +820,11 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       ...(initial.search ? WEB_TOOL_SCHEMAS : []),
       ...(needsOcr ? [OCR_TOOL_SCHEMA, READ_TOOL_SCHEMA] : []),
     ]
+    // 工具只会调 DeepSeek 服务：优先独立配置的 Key，其次旧版 Key，DeepSeek 模型可复用模型 Key
+    const serviceApiKey =
+      settings.provider.serviceApiKey.trim() ||
+      settings.apiKey ||
+      (settings.provider.piProvider === 'deepseek' ? settings.provider.apiKey.trim() : '')
     // 身份、当前时间、位置、平台与语言；每次请求按本地时区重新生成
     const systemPrompt = createSystemPrompt({
       provider: settings.provider.piProvider,
@@ -844,8 +849,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       model: settings.provider.model,
       messages,
       tools: toolSchemas,
-      // 工具 API 与模型请求共用一个 Key；旧版本单独保存的 Key 作为回退
-      toolApiKey: settings.provider.apiKey.trim() || settings.apiKey || '',
+      toolApiKey: serviceApiKey,
       loadFile: db.loadFile,
       saveFileText: db.saveFileText,
       loadFileText: db.loadFileText,

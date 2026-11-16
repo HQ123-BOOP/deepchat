@@ -462,6 +462,16 @@ const ProviderSetting = () => {
       </div>
       <div className={styles.apiKeyInput} style={fieldStyle}>
         <input
+          type="password"
+          placeholder={t('settingsProviderServiceApiKey')}
+          autoComplete="new-password"
+          spellCheck={false}
+          value={provider.serviceApiKey}
+          onChange={(event) => setProviderConfig({ serviceApiKey: event.target.value })}
+        />
+      </div>
+      <div className={styles.apiKeyInput} style={fieldStyle}>
+        <input
           placeholder={t('settingsProviderPiBaseUrl')}
           autoComplete="off"
           spellCheck={false}

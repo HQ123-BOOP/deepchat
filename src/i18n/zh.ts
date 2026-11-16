@@ -189,6 +189,7 @@ export const zh = {
   modalityVideo: '视频',
   settingsProviderPiBaseUrl: 'API Base URL',
   settingsProviderApiKey: 'API Key',
+  settingsProviderServiceApiKey: 'DeepSeek 服务 Key（OCR、联网搜索与网页抓取）',
   settingsProviderContextWindow: '上下文窗口',
   settingsProviderMaxTokens: '最大输出',
   settingsAsrModel: 'ASR 语音识别模型',
