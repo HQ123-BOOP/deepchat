@@ -25,13 +25,23 @@
   }
 }
 
+/* 与智能搜索的选中态共用同一组 token，两个 chip 的配色保持一致 */
 .triggerActive {
-  border-color: var(--dsw-alias-brand-primary);
-  color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-button-ghost-active-border);
+  background-color: var(--dsw-alias-button-ghost-active-fill);
+  color: var(--dsw-alias-brand-text);
+
+  &:hover {
+    background-color: var(--dsw-alias-button-ghost-active-hover);
+  }
 }
 
 .value {
   color: var(--dsw-alias-label-caption);
+}
+
+.triggerActive .value {
+  color: inherit;
 }
 
 .menu {
