@@ -84,6 +84,26 @@ const lookupBuiltin = (config: PiAiConfig, modelId?: string) => {
   }
 }
 
+/** 当前模型是否直接支持图片输入：显式声明优先，其次内置目录 */
+export const modelAcceptsImages = (
+  provider: string,
+  model: string,
+  inputModalities?: string[] | null
+): boolean => {
+  if (inputModalities?.length) {
+    return inputModalities.includes('image')
+  }
+  try {
+    if (!(getBuiltinProviders() as readonly string[]).includes(provider)) {
+      return false
+    }
+    const match = getBuiltinModels(provider as BuiltinProvider).find((item) => item.id === model)
+    return match?.input.includes('image') ?? false
+  } catch {
+    return false
+  }
+}
+
 /** DeepSeek 的 OpenAI 兼容端点不带 /v1；其余按内置目录、协议默认值依次回退 */
 export const resolvePiBaseUrl = (config: PiAiConfig): string => {
   const explicit = config.baseUrl.trim()

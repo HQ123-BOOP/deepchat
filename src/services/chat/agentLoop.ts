@@ -4,7 +4,13 @@
  * DeepSeek 原生路径不需要它（联网由服务端在一个响应内完成）；这里只给
  * "其他提供商 + 标准 function tools" 使用。
  */
-import { runTool, type ToolSource } from '../tools/registry.js'
+import {
+  classifyToolFailure,
+  runTool,
+  type ParsedAttachment,
+  type ToolFailureCode,
+  type ToolSource,
+} from '../tools/registry.js'
 import type {
   ChatProvider,
   ProviderMessage,
@@ -18,7 +24,15 @@ export type AgentEvent =
   | { type: 'reasoning'; text: string }
   | { type: 'reasoning_signature'; signature: string }
   | { type: 'tool_start'; call: ToolCall }
-  | { type: 'tool_result'; call: ToolCall; sources: ToolSource[]; ok: boolean; error?: string }
+  | {
+      type: 'tool_result'
+      call: ToolCall
+      sources: ToolSource[]
+      ok: boolean
+      error?: string
+      /** 失败分类，供 UI 显示具体原因 */
+      failure?: { code: ToolFailureCode; tool: string; status: number }
+    }
   | { type: 'done'; stopReason: 'stop' | 'length' | 'tool_limit' | 'error'; error?: string }
 
 export type AgentOptions = {
@@ -32,6 +46,10 @@ export type AgentOptions = {
   toolApiKey: string
   /** 按附件 id 读取本地原件，供 ocr_file 使用 */
   loadFile: (id: string) => Promise<Blob | undefined>
+  /** 保存 OCR 全文，供 read 与 UI 共用 */
+  saveFileText?: (doc: ParsedAttachment) => Promise<void>
+  /** 读取已保存的 OCR 全文 */
+  loadFileText?: (id: string) => Promise<ParsedAttachment | undefined>
   /** 本地 id → 文件名 */
   fileNames?: Record<string, string>
   signal?: AbortSignal
@@ -124,6 +142,8 @@ export async function* runAgent(
         const result = await runTool(call.name, parsed, {
           apiKey: options.toolApiKey,
           loadFile: options.loadFile,
+          saveFileText: options.saveFileText,
+          loadFileText: options.loadFileText,
           fileNames: options.fileNames,
           signal: options.signal,
         })
@@ -131,9 +151,16 @@ export async function* runAgent(
         sources = result.sources
       } catch (error) {
         ok = false
-        const message = error instanceof Error ? error.message : String(error)
-        content = `工具 ${call.name} 执行失败：${message}`
-        yield { type: 'tool_result', call, sources, ok, error: message }
+        const failure = classifyToolFailure(call.name, error)
+        content = `工具 ${call.name} 执行失败：${failure.message}`
+        yield {
+          type: 'tool_result',
+          call,
+          sources,
+          ok,
+          error: failure.message,
+          failure: { code: failure.code, tool: failure.tool, status: failure.status },
+        }
         messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content })
         continue
       }

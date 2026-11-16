@@ -13,6 +13,7 @@ import {
   IconSearchOutline16,
   IconSearchWarningOutline16,
   IconThinkOutline16,
+  IconWarningOutline16,
 } from '../base/icons.js'
 import type { AssistantMessage } from '../../services/chat/types.js'
 import {
@@ -27,6 +28,7 @@ import {
   type SearchStep,
   type Source,
   type Step,
+  type ToolErrorStep,
 } from '../../services/chat/view.js'
 import { Tooltip } from '../base/Tooltip.js'
 import { Markdown } from '../markdown/Markdown.js'
@@ -122,6 +124,7 @@ const StepItem = ({
   streaming: boolean
   isLast: boolean
 }) => {
+  const t = useTranslate()
   switch (step.type) {
     case 'thinking': {
       const lastBlock = step.blocks.at(-1)
@@ -158,9 +161,34 @@ const StepItem = ({
       return <FindRow step={step} isLast={isLast} />
     case 'read_link':
       return <ReadLinkRow step={step} isLast={isLast} />
+    case 'tool_error':
+      return (
+        <ToolRow icon={<IconWarningOutline16 />} isLast={isLast}>
+          <span>{toolErrorText(step, t)}</span>
+        </ToolRow>
+      )
     default:
       return null
   }
+}
+
+type Translate = ReturnType<typeof useTranslate>
+
+/** 工具失败文案：按工具与失败类别区分，未知工具带上模型实际调用的名字 */
+const toolErrorText = (step: ToolErrorStep, t: Translate): string => {
+  if (step.code === 'unknown_tool') {
+    return t('toolUnknown', { name: step.tool })
+  }
+  if (step.tool === 'read_url') {
+    return t(step.code === 'invalid_arguments' ? 'toolReadInvalid' : 'toolReadFailed')
+  }
+  if (step.tool === 'ocr_file') {
+    return t(step.code === 'invalid_arguments' ? 'toolOcrInvalid' : 'toolOcrFailed')
+  }
+  if (step.tool === 'read') {
+    return t(step.code === 'invalid_arguments' ? 'toolReadFileInvalid' : 'toolReadFileFailed')
+  }
+  return t('toolSearchFail')
 }
 
 /** 思考或过程性文字：左侧圆点 + 竖线，小号 markdown */
@@ -219,7 +247,9 @@ const SearchRow = ({
   } else if (interrupted) {
     body = <span>{t('searchStopped')}</span>
   } else if (failed) {
-    body = <span>{t('toolSearchFail')}</span>
+    body = (
+      <span>{t(step.error === 'not_found' ? 'toolSearchNotFound' : 'toolSearchFail')}</span>
+    )
   } else if (count === 0) {
     body = (
       <span>{t(isDeepSearchKind(step.kind) ? 'toolSearchNoResult' : 'messageSearchNoResult')}</span>

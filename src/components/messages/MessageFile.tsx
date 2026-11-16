@@ -2,11 +2,12 @@ import clsx from 'clsx'
 import { useEffect, useState } from 'react'
 import { useTranslate } from '../../i18n/index.js'
 import { useUploads } from '../../services/attachments.js'
-import { loadFile } from '../../services/chat/db.js'
+import { loadFile, loadFileText, type StoredFileText } from '../../services/chat/db.js'
 import type { FileAttachment } from '../../services/chat/types.js'
 import { IconPhotoErrorFill20, IconRefreshOutline16 } from '../base/icons.js'
 import { Tooltip } from '../base/Tooltip.js'
 import { FileCard } from '../files/FileCard.js'
+import { FileTextViewer } from '../files/FileTextViewer.js'
 import styles from './MessageFile.module.css'
 
 /** 原件从 IndexedDB 读出并生成本地地址；undefined 表示加载中，null 表示原件缺失。 */
@@ -58,6 +59,8 @@ export const MessageFile = ({
   const t = useTranslate()
   const url = useFileUrl(file.id)
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
+  // 已解析过的附件优先打开识别文本，没有结果时才回退到原件
+  const [viewing, setViewing] = useState<StoredFileText | null>(null)
   const upload = useUploadState(file)
   const uploading = upload?.status === 'uploading'
   const failed = upload?.status === 'error'
@@ -151,14 +154,28 @@ export const MessageFile = ({
     )
   }
 
+  const open = async () => {
+    const doc = await loadFileText(file.id)
+    if (doc) {
+      setViewing(doc)
+      return
+    }
+    if (url) {
+      window.open(url, '_blank', 'noreferrer')
+    }
+  }
+
   return (
-    <FileCard
-      name={file.name}
-      size={file.size}
-      status={uploading ? 'uploading' : failed ? 'error' : 'done'}
-      error={errorText}
-      onRetry={retry ?? undefined}
-      onOpen={url && !upload ? () => window.open(url, '_blank', 'noreferrer') : undefined}
-    />
+    <>
+      <FileCard
+        name={file.name}
+        size={file.size}
+        status={uploading ? 'uploading' : failed ? 'error' : 'done'}
+        error={errorText}
+        onRetry={retry ?? undefined}
+        onOpen={url && !upload ? open : undefined}
+      />
+      {viewing ? <FileTextViewer doc={viewing} onClose={() => setViewing(null)} /> : null}
+    </>
   )
 }

@@ -2,12 +2,25 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import { toSessionSummary, type Session, type SessionSummary } from './types.js'
 
 /** IndexedDB 存储结构版本；新增或调整存储、索引时递增。 */
-const DB_VERSION = 11
+const DB_VERSION = 12
 
 /** 文件原件按附件的本地 id 存储，所有引用同一 id 的消息共用一份；用于缩略图、打开查看，以及没有 serverId 时补传。 */
 export type StoredFile = {
   id: string
   blob: Blob
+}
+
+/**
+ * 附件经 OCR 解析出的纯文本，按附件 id 存一份。
+ * 模型只读前若干字符，剩余部分靠 read 工具分段取；用户也可以直接打开查看。
+ */
+export type StoredFileText = {
+  id: string
+  name: string
+  text: string
+  pages: number
+  purpose: 'text_recognition' | 'rich_layout_recognition'
+  createdAt: number
 }
 
 /** 文件引用留在摘要中，删除会话时通过索引判断原件是否仍被引用。 */
@@ -23,6 +36,8 @@ interface ChatDB extends DBSchema {
   }
   /** 当前使用的文件原件 */
   files: { key: string; value: StoredFile }
+  /** 附件的 OCR 文本；key 与 files 相同，便于按附件 id 直接取用 */
+  fileTexts: { key: string; value: StoredFileText }
   /**
    * 历史导入的暂存：导入过程中会话与原件只写入这两个存储，`sessions` / `files` 保持不变；
    * 全部校验通过后在一个事务中替换正式数据并清空暂存，失败时只清空暂存。
@@ -57,7 +72,13 @@ const getDB = () =>
   (dbPromise ??= openDB<ChatDB>('chat-demo', DB_VERSION, {
     upgrade(db, _oldVersion, _newVersion, tx) {
       // 初始化当前格式需要的存储与索引，不迁移旧消息。
-      for (const name of ['sessions', 'files', 'sessionsStaging', 'filesStaging'] as const) {
+      for (const name of [
+        'sessions',
+        'files',
+        'fileTexts',
+        'sessionsStaging',
+        'filesStaging',
+      ] as const) {
         if (!db.objectStoreNames.contains(name)) {
           db.createObjectStore(name, { keyPath: 'id' })
         }
@@ -123,9 +144,12 @@ export const renameSession = async (id: string, title: string): Promise<void> =>
   ])
 }
 
-/** 删除会话，仅清理已无会话引用的本地原件；远端文件不删。 */
+/** 删除会话，仅清理已无会话引用的本地原件与识别文本；远端文件不删。 */
 export const deleteSession = async (sessionId: string): Promise<void> => {
-  const tx = (await getDB()).transaction(['sessions', 'sessionSummaries', 'files'], 'readwrite')
+  const tx = (await getDB()).transaction(
+    ['sessions', 'sessionSummaries', 'files', 'fileTexts'],
+    'readwrite'
+  )
   await Promise.all([
     (async () => {
       try {
@@ -136,6 +160,7 @@ export const deleteSession = async (sessionId: string): Promise<void> => {
         for (const id of summary?.fileIds ?? []) {
           if ((await summaries.index('fileIds').count(id)) === 0) {
             await tx.objectStore('files').delete(id)
+            await tx.objectStore('fileTexts').delete(id)
           }
         }
       } catch (error) {
@@ -156,6 +181,15 @@ export const saveFiles = (files: StoredFile[]): Promise<void> => putFiles('files
 
 export const loadFile = async (id: string): Promise<Blob | undefined> =>
   (await (await getDB()).get('files', id))?.blob
+
+/** 保存一次 OCR 结果；同一附件重新解析时直接覆盖。 */
+export const saveFileText = async (doc: StoredFileText): Promise<void> => {
+  const tx = (await getDB()).transaction('fileTexts', 'readwrite')
+  await Promise.all([tx.store.put(doc), tx.done])
+}
+
+export const loadFileText = async (id: string): Promise<StoredFileText | undefined> =>
+  (await getDB()).get('fileTexts', id)
 
 /** 清空导入暂存：开始导入前清除上次中断（如关闭页面）遗留的数据，导入失败后清除本次写入。 */
 export const clearStaging = async (): Promise<void> => {

@@ -5,10 +5,17 @@
  * 调 DeepSeek 工具 API 执行，结果回填后再请求一次。
  * 文案对齐 DSH 的 web 工具：描述保持简短，外部内容的不可信提示放在系统提示里。
  */
-import { fetchPage, ocrFile, searchWeb, type OcrPurpose, type SearchResult } from './deepseekTools.js'
+import {
+  fetchPage,
+  ocrFile,
+  searchWeb,
+  ToolApiError,
+  type OcrPurpose,
+  type SearchResult,
+} from './deepseekTools.js'
 import type { JsonSchema, ToolSchema } from '../providers/types.js'
 
-export type ToolName = 'web_search' | 'read_url' | 'ocr_file'
+export type ToolName = 'web_search' | 'read_url' | 'ocr_file' | 'read'
 
 /** 联网开关打开时才声明 */
 export const WEB_TOOL_SCHEMAS: ToolSchema[] = [
@@ -48,19 +55,52 @@ export const WEB_TOOL_SCHEMAS: ToolSchema[] = [
   },
 ]
 
-/** 本轮有附件时才声明，由模型自行决定何时读取附件内容 */
+/** OCR 一次最多回给模型的字符数；超出部分由 read 分段续读 */
+export const OCR_PREVIEW_CHARS = 50_000
+/** read 单次默认与上限，对齐 DSH 的 read 窗口做法 */
+export const READ_DEFAULT_CHARS = 50_000
+export const READ_MAX_CHARS = 50_000
+
+/** 本轮有附件时才声明：解析结果落到应用内部，模型按 file_id 读取 */
 export const OCR_TOOL_SCHEMA: ToolSchema = {
   name: 'ocr_file',
   description:
-    '读取本轮消息附带的 PDF、Word、PowerPoint 或图片，返回逐页识别出的文字。需要引用文档内容、或用户问到附件里的信息时使用。file_id 取自用户消息里的附件清单。',
+    'Parse an attached document or image with OCR and save the recognized text as an in-app document. Returns the beginning of the text; continue with the read tool and the same file_id when it is truncated.',
   parameters: {
     type: 'object',
     properties: {
-      file_id: { type: 'string', description: '用户消息【本轮附件】清单中给出的 file_id' },
+      file_id: { type: 'string', description: 'The file_id listed under attachments in the user message.' },
       purpose: {
         type: 'string',
         enum: ['text_recognition', 'rich_layout_recognition'],
-        description: '默认 text_recognition；需要保留版面坐标时用 rich_layout_recognition',
+        description:
+          'Defaults to text_recognition; use rich_layout_recognition to keep layout and figures.',
+      },
+    },
+    required: ['file_id'],
+    additionalProperties: false,
+  } satisfies JsonSchema,
+}
+
+/** 只在有解析结果需要续读时才有意义；与 ocr_file 一起声明 */
+export const READ_TOOL_SCHEMA: ToolSchema = {
+  name: 'read',
+  description:
+    'Read the text saved for an attachment. Returns a bounded window starting at a 1-based character offset; call it again with the returned offset to continue a long document.',
+  parameters: {
+    type: 'object',
+    properties: {
+      file_id: { type: 'string', description: 'The attachment file_id from the user message.' },
+      offset: {
+        type: 'integer',
+        description: '1-based character offset to start from. Defaults to 1.',
+        minimum: 1,
+      },
+      limit: {
+        type: 'integer',
+        description: `Maximum characters to return. Defaults to ${READ_DEFAULT_CHARS}.`,
+        minimum: 1,
+        maximum: READ_MAX_CHARS,
       },
     },
     required: ['file_id'],
@@ -69,7 +109,21 @@ export const OCR_TOOL_SCHEMA: ToolSchema = {
 }
 
 /** 全量工具集合；实际请求按开关与本轮附件裁剪 */
-export const TOOL_SCHEMAS: ToolSchema[] = [...WEB_TOOL_SCHEMAS, OCR_TOOL_SCHEMA]
+export const TOOL_SCHEMAS: ToolSchema[] = [
+  ...WEB_TOOL_SCHEMAS,
+  OCR_TOOL_SCHEMA,
+  READ_TOOL_SCHEMA,
+]
+
+/** 一份落盘的 OCR 结果 */
+export type ParsedAttachment = {
+  id: string
+  name: string
+  text: string
+  pages: number
+  purpose: OcrPurpose
+  createdAt: number
+}
 
 /** 工具执行产生的一条来源，供 UI 展示引用 */
 export type ToolSource = {
@@ -87,6 +141,44 @@ export type ToolRunResult = {
   sources: ToolSource[]
 }
 
+/** 工具失败分类：未知工具 / 参数错 / 404 / 服务不可用 */
+export type ToolFailureCode = 'unknown_tool' | 'invalid_arguments' | 'not_found' | 'unavailable'
+
+export class ToolFailure extends Error {
+  readonly code: ToolFailureCode
+  readonly tool: string
+  readonly status: number
+
+  constructor(tool: string, code: ToolFailureCode, message: string, status = 0) {
+    super(message)
+    this.name = 'ToolFailure'
+    this.tool = tool
+    this.code = code
+    this.status = status
+  }
+}
+
+/** 把执行期异常归一成可展示的失败类别 */
+export const classifyToolFailure = (tool: string, error: unknown): ToolFailure => {
+  if (error instanceof ToolFailure) {
+    return error
+  }
+  if (error instanceof ToolApiError) {
+    const code: ToolFailureCode =
+      error.status === 404
+        ? 'not_found'
+        : error.status === 0 || error.status >= 500
+          ? 'unavailable'
+          : 'invalid_arguments'
+    return new ToolFailure(tool, code, error.message, error.status)
+  }
+  return new ToolFailure(
+    tool,
+    'unavailable',
+    error instanceof Error ? error.message : String(error)
+  )
+}
+
 const trim = (text: string, limit: number) =>
   text.length <= limit ? text : `${text.slice(0, limit)}…`
 
@@ -102,9 +194,25 @@ export type ToolContext = {
   apiKey: string
   /** 按附件本地 id 取回原件；tool call 只能传 JSON 文本，二进制从这里取 */
   loadFile: (id: string) => Promise<Blob | undefined>
+  /** 保存 OCR 全文，供 read 与 UI 共用 */
+  saveFileText?: (doc: ParsedAttachment) => Promise<void>
+  /** 读取已保存的 OCR 全文 */
+  loadFileText?: (id: string) => Promise<ParsedAttachment | undefined>
   /** 本地 id → 文件名，仅用于 OCR 的 multipart 字段名 */
   fileNames?: Record<string, string>
   signal?: AbortSignal
+}
+
+/** read 的 offset / limit 只接受正整数 */
+const positiveInteger = (name: string, value: unknown): number | undefined => {
+  if (value === undefined || value === null) {
+    return undefined
+  }
+  const parsed = typeof value === 'number' ? Math.trunc(value) : Number.NaN
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    throw new ToolFailure('read', 'invalid_arguments', `read 的 ${name} 必须是正整数`)
+  }
+  return parsed
 }
 
 /** 执行一次工具调用；未知工具或参数非法时抛错，由调用方决定如何回填 */
@@ -116,7 +224,7 @@ export const runTool = async (
   if (name === 'web_search') {
     const query = typeof args.query === 'string' ? args.query.trim() : ''
     if (!query) {
-      throw new Error('web_search 需要非空的 query')
+      throw new ToolFailure('web_search', 'invalid_arguments', 'web_search 需要非空的 query')
     }
     const count = typeof args.count === 'number' ? args.count : 10
     const results = await searchWeb({
@@ -140,7 +248,7 @@ export const runTool = async (
   if (name === 'read_url') {
     const url = typeof args.url === 'string' ? args.url.trim() : ''
     if (!/^https?:\/\//i.test(url)) {
-      throw new Error('read_url 需要 http/https 开头的 url')
+      throw new ToolFailure('read_url', 'invalid_arguments', 'read_url 需要 http/https 开头的 url')
     }
     const page = await fetchPage(ctx.apiKey, url, ctx.signal)
     return {
@@ -151,11 +259,15 @@ export const runTool = async (
   if (name === 'ocr_file') {
     const id = typeof args.file_id === 'string' ? args.file_id.trim() : ''
     if (!id) {
-      throw new Error('ocr_file 需要非空的 file_id')
+      throw new ToolFailure('ocr_file', 'invalid_arguments', 'ocr_file 需要非空的 file_id')
     }
     const blob = await ctx.loadFile(id)
     if (!blob) {
-      throw new Error(`找不到附件 ${id} 的本地原件，可能已被清理`)
+      throw new ToolFailure(
+        'ocr_file',
+        'invalid_arguments',
+        `找不到附件 ${id} 的本地原件，可能已被清理`
+      )
     }
     const purpose: OcrPurpose =
       args.purpose === 'rich_layout_recognition' ? 'rich_layout_recognition' : 'text_recognition'
@@ -167,10 +279,57 @@ export const runTool = async (
       signal: ctx.signal,
     })
     const text = result.pages.map((page) => page.text).join('\n\n')
+    const fileName = ctx.fileNames?.[id] ?? id
+    // 全文落盘，模型只看到前一段；剩余部分由 read 按偏移续读
+    await ctx.saveFileText?.({
+      id,
+      name: fileName,
+      text,
+      pages: result.page_count,
+      purpose,
+      createdAt: Date.now(),
+    })
+    const head = text.slice(0, OCR_PREVIEW_CHARS)
+    const remain = text.length - head.length
+    const lines = [`附件「${fileName}」识别完成：共 ${result.page_count} 页、${text.length} 字符。`]
+    if (remain > 0) {
+      lines.push(
+        `以下是第 1–${head.length} 字符；剩余 ${remain} 字符，调用 read（file_id: ${id}，offset: ${head.length + 1}）继续读取。`
+      )
+    }
     return {
-      content: `附件识别结果（共 ${result.page_count} 页）：\n\n${trim(text, 20000)}`,
+      content: `${lines.join('\n')}\n\n${head}`,
       sources: [],
     }
   }
-  throw new Error(`未知工具：${name}`)
+  if (name === 'read') {
+    const id = typeof args.file_id === 'string' ? args.file_id.trim() : ''
+    if (!id) {
+      throw new ToolFailure('read', 'invalid_arguments', 'read 需要非空的 file_id')
+    }
+    const doc = await ctx.loadFileText?.(id)
+    if (!doc) {
+      throw new ToolFailure(
+        'read',
+        'invalid_arguments',
+        `附件 ${id} 还没有识别结果，先调用 ocr_file 解析`
+      )
+    }
+    const total = doc.text.length
+    const offset = positiveInteger('offset', args.offset) ?? 1
+    if (total > 0 && offset > total) {
+      throw new ToolFailure(
+        'read',
+        'invalid_arguments',
+        `offset 超出范围：全文共 ${total} 字符`
+      )
+    }
+    const limit = Math.min(positiveInteger('limit', args.limit) ?? READ_DEFAULT_CHARS, READ_MAX_CHARS)
+    const slice = doc.text.slice(offset - 1, offset - 1 + limit)
+    const end = offset - 1 + slice.length
+    const header = `附件「${doc.name}」第 ${offset}–${end} 字符，共 ${total} 字符。`
+    const footer = end < total ? `\n\n[已截断] 继续读取请调用 read，offset: ${end + 1}。` : ''
+    return { content: `${header}\n\n${slice}${footer}`, sources: [] }
+  }
+  throw new ToolFailure(name, 'unknown_tool', `未知工具：${name}`)
 }

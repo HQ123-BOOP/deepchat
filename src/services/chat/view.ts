@@ -5,8 +5,9 @@ import type {
   WebFetchToolResultBlock,
   WebSearchResult,
   WebSearchToolResultBlock,
+  WebSearchToolResultError,
 } from '../api/types.js'
-import type { AssistantMessage, ThinkingPart } from './types.js'
+import type { AssistantMessage, ThinkingPart, ToolErrorCode } from './types.js'
 
 /**
  * 由回复的内容块推导界面需要的结构：思考与工具步骤的时间线、带引用角标的正文、可引用的来源列表。
@@ -43,6 +44,8 @@ export type SearchStep = {
   queries: string[]
   results: Source[]
   status: ToolStatus
+  /** 搜索失败时的具体类别：404 显示「未搜索到内容」，其余显示「暂不可用」 */
+  error?: WebSearchToolResultError['error_code']
 }
 
 export type PageItem = {
@@ -61,12 +64,27 @@ export type FindStep = {
 
 export type ReadLinkStep = { type: 'read_link'; links: PageItem[] }
 
+/** 阅读、OCR 或未知工具的失败行 */
+export type ToolErrorStep = {
+  type: 'tool_error'
+  key: string
+  tool: string
+  code: ToolErrorCode
+}
+
 export type ThinkingStep = { type: 'thinking'; key: string; blocks: ThinkingPart[] }
 
 /** 工具调用前输出的说明文字 */
 export type PreambleStep = { type: 'text'; key: string; markdown: string }
 
-export type Step = SearchStep | OpenStep | FindStep | ReadLinkStep | ThinkingStep | PreambleStep
+export type Step =
+  | SearchStep
+  | OpenStep
+  | FindStep
+  | ReadLinkStep
+  | ThinkingStep
+  | PreambleStep
+  | ToolErrorStep
 
 export type ReplyView = {
   steps: Step[]
@@ -246,6 +264,11 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
       }
       return
     }
+    if (block.type === 'tool_error') {
+      flushPreamble()
+      steps.push({ type: 'tool_error', key: block.id, tool: block.tool, code: block.code })
+      return
+    }
     if (block.type !== 'server_tool_use') {
       return
     }
@@ -277,6 +300,13 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
                 : []
             )
           : []
+      const errorItem =
+        result?.type === 'web_search_tool_result'
+          ? result.content.find(
+              (item): item is WebSearchToolResultError =>
+                item.type === 'web_search_tool_result_error'
+            )
+          : undefined
       // 普通搜索按种类聚合到首次出现的位置；边想边搜只合并相邻、同种类的调用。
       const target = isDeepSearchKind(kind)
         ? last?.type === 'search' && last.kind === kind
@@ -287,6 +317,9 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
         target.queries.push(...queries)
         target.results.push(...found.filter((source) => !target.results.includes(source)))
         target.status = mergeStatus([target.status, status])
+        if (errorItem) {
+          target.error = errorItem.error_code
+        }
       } else {
         const step: SearchStep = {
           type: 'search',
@@ -295,6 +328,7 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
           queries: [...queries],
           results: found,
           status,
+          ...(errorItem ? { error: errorItem.error_code } : {}),
         }
         steps.push(step)
         if (!isDeepSearchKind(kind)) {

@@ -62,7 +62,19 @@ export type TextPart = {
 }
 
 /** 服务端工具调用与结果块按协议原样保存；历史请求只回传 read_link 调用与结果 */
-export type ReplyBlock = ThinkingPart | TextPart | ServerToolBlock
+/** 工具失败类别，与执行层的 ToolFailureCode 一一对应 */
+export type ToolErrorCode = 'unknown_tool' | 'invalid_arguments' | 'not_found' | 'unavailable'
+
+/** 工具调用失败：保留一行可见的错误，tool 为模型实际调用的名字 */
+export type ToolErrorPart = {
+  type: 'tool_error'
+  id: string
+  tool: string
+  code: ToolErrorCode
+  status?: number
+}
+
+export type ReplyBlock = ThinkingPart | TextPart | ServerToolBlock | ToolErrorPart
 
 /**
  * pending：已发出请求，还没收到事件；streaming：正在接收；

@@ -7,6 +7,7 @@
  */
 import { runAgent } from './agentLoop.js'
 import { settleReply } from './reply.js'
+import type { ParsedAttachment } from '../tools/registry.js'
 import type {
   ChatProvider,
   ProviderMessage,
@@ -31,6 +32,10 @@ export type ProviderReplyOptions = {
   toolApiKey: string
   /** ocr_file 按附件 id 读取本地原件 */
   loadFile: (id: string) => Promise<Blob | undefined>
+  /** 保存 OCR 全文，供 read 与 UI 共用 */
+  saveFileText?: (doc: ParsedAttachment) => Promise<void>
+  /** 读取已保存的 OCR 全文 */
+  loadFileText?: (id: string) => Promise<ParsedAttachment | undefined>
   /** 本地 id → 文件名 */
   fileNames?: Record<string, string>
   /** 初始回复（store 已插好空回复） */
@@ -120,6 +125,8 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
       tools: options.tools,
       toolApiKey: options.toolApiKey,
       loadFile: options.loadFile,
+      saveFileText: options.saveFileText,
+      loadFileText: options.loadFileText,
       fileNames: options.fileNames,
       signal: options.signal,
       reasoningEffort: options.reasoningEffort,
@@ -133,8 +140,12 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
       } else if (event.type === 'tool_start') {
         // 工具调用说明思考阶段已结束
         closeThinking(Date.now())
-        // OCR 结果只回填给模型，不生成联网步骤卡片
-        if (event.call.name === 'ocr_file') {
+        // 附件解析与续读只回填给模型，不生成联网步骤卡片
+        if (event.call.name === 'ocr_file' || event.call.name === 'read') {
+          continue
+        }
+        // 未知工具不冒充搜索，等失败结果里再显示「未知工具」
+        if (event.call.name !== 'web_search' && event.call.name !== 'read_url') {
           continue
         }
         let args: Record<string, unknown> = {}
@@ -156,7 +167,41 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
         } as ServerToolUseBlock)
         options.onChange(reply)
       } else if (event.type === 'tool_result') {
-        if (event.call.name === 'ocr_file') {
+        if (!event.ok) {
+          const failure = event.failure
+          if (event.call.name === 'web_search') {
+            // 搜索失败沿用搜索块，视图据此显示「暂不可用」或「未搜索到内容」
+            pushBlock({
+              type: 'web_search_tool_result',
+              tool_use_id: toolUseId(event.call.id),
+              kind: 'search',
+              content: [
+                {
+                  type: 'web_search_tool_result_error',
+                  error_code: failure?.code === 'not_found' ? 'not_found' : 'unavailable',
+                },
+              ],
+            })
+          } else {
+            // 阅读失败时移除进行中的卡片，避免同时出现「正在阅读」和错误行
+            const failedId = toolUseId(event.call.id)
+            reply = {
+              ...reply,
+              blocks: reply.blocks.filter((block) => !('id' in block) || block.id !== failedId),
+            }
+            // 阅读、OCR、未知工具：保留一行具体错误
+            pushBlock({
+              type: 'tool_error',
+              id: failedId,
+              tool: failure?.tool ?? event.call.name,
+              code: failure?.code ?? 'unavailable',
+              ...(failure?.status ? { status: failure.status } : {}),
+            })
+          }
+          options.onChange(reply)
+          continue
+        }
+        if (event.call.name === 'ocr_file' || event.call.name === 'read') {
           continue
         }
         if (event.call.name === 'read_url') {

@@ -1,0 +1,25 @@
+.dialog {
+  width: min(760px, 92vw);
+}
+
+.main {
+  padding: 0;
+}
+
+.text {
+  max-height: min(62vh, 620px);
+  margin: 0;
+  padding: 16px 18px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  font-size: 12px;
+  color: var(--dsw-alias-label-caption);
+}

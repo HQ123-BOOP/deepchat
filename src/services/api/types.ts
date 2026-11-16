@@ -74,7 +74,8 @@ export type WebSearchResult = {
 
 export type WebSearchToolResultError = {
   type: 'web_search_tool_result_error'
-  error_code: 'unavailable'
+  /** not_found 表示搜索服务正常但没有结果；其余按服务不可用展示 */
+  error_code: 'unavailable' | 'not_found'
 }
 
 export type WebSearchToolResultBlock = {

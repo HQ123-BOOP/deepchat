@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
-import { createConfiguredPiProvider } from '../providers/piAi.js'
+import { createConfiguredPiProvider, modelAcceptsImages } from '../providers/piAi.js'
 import type { ProviderImage } from '../providers/types.js'
-import { OCR_TOOL_SCHEMA, WEB_TOOL_SCHEMAS } from '../tools/registry.js'
+import { OCR_TOOL_SCHEMA, READ_TOOL_SCHEMA, WEB_TOOL_SCHEMAS } from '../tools/registry.js'
 import { runProviderReply } from './providerReply.js'
 import { buildProviderMessages, type AttachmentRef } from './providerContext.js'
 import { maybeGenerateTitle } from './autoTitle.js'
@@ -808,9 +808,17 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       request.question.files,
       controller.signal
     )
+    // 视觉模型直接理解图片，纯图片时不给 OCR；只要有文档，或模型读不了图片，就需要解析
+    const acceptsImages = modelAcceptsImages(
+      settings.provider.piProvider,
+      settings.provider.model,
+      settings.provider.inputModalities
+    )
+    const hasDocuments = refs.some((ref) => !ref.isImage)
+    const needsOcr = refs.length > 0 && (hasDocuments || !acceptsImages)
     const toolSchemas = [
       ...(initial.search ? WEB_TOOL_SCHEMAS : []),
-      ...(refs.length ? [OCR_TOOL_SCHEMA] : []),
+      ...(needsOcr ? [OCR_TOOL_SCHEMA, READ_TOOL_SCHEMA] : []),
     ]
     // 身份、当前时间、位置、平台与语言；每次请求按本地时区重新生成
     const systemPrompt = createSystemPrompt({
@@ -839,6 +847,8 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       // 工具 API 与模型请求共用一个 Key；旧版本单独保存的 Key 作为回退
       toolApiKey: settings.provider.apiKey.trim() || settings.apiKey || '',
       loadFile: db.loadFile,
+      saveFileText: db.saveFileText,
+      loadFileText: db.loadFileText,
       fileNames,
       reply,
       signal: controller.signal,
