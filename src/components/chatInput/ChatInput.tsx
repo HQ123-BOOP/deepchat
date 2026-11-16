@@ -1,8 +1,9 @@
 import clsx from 'clsx'
-import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   IconGlobeLanguageOutline14,
   IconPaperclipOutline16,
+  IconPlusOutline16,
   IconSendOutline16,
   IconStopFill16,
 } from '../base/icons.js'
@@ -26,6 +27,7 @@ import { ensureApiKey } from '../settings/settingsDialogState.js'
 import { DragMask, useFileDrop } from './DragMask.js'
 import { showToast } from '../base/toastState.js'
 import { ACCEPT, useUploads } from '../../services/attachments.js'
+import { AttachmentSheet } from './AttachmentSheet.js'
 import { DraftAttachments } from './DraftAttachments.js'
 import { ReasoningMenu } from './ReasoningMenu.js'
 import { useVoiceInput } from './useVoiceInput.js'
@@ -53,8 +55,12 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const isMobile = useIsMobile()
   const search = useSettings((state) => state.search)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const galleryInputRef = useRef<HTMLInputElement>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const togglesRef = useRef<HTMLDivElement>(null)
+  const [sheetOpen, setSheetOpen] = useState(false)
 
   useLayoutEffect(() => {
     const toggles = togglesRef.current
@@ -72,6 +78,25 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     observer.observe(toggles)
     return () => observer.disconnect()
   }, [t])
+
+  // 点输入框和附件面板以外的空白区域收起面板
+  useEffect(() => {
+    if (!isMobile || !sheetOpen) {
+      return
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Element)) {
+        return
+      }
+      if (wrapperRef.current?.contains(target) || target.closest('[data-attachment-sheet]')) {
+        return
+      }
+      setSheetOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [isMobile, sheetOpen])
 
   const acceptFiles = (files: File[]) => {
     if (files.length === 0 || useChatStore.getState().importingHistory || !ensureApiKey()) {
@@ -152,14 +177,35 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   }
 
   return (
-    <div
-      className={clsx(styles.wrapper, sessionId === null ? styles.home : styles.session)}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          textareaRef.current?.focus({ preventScroll: true })
-        }
-      }}
-    >
+    <>
+      {isMobile ? (
+        <AttachmentSheet
+          open={sheetOpen}
+          onClose={() => setSheetOpen(false)}
+          onCamera={() => {
+            setSheetOpen(false)
+            cameraInputRef.current?.click()
+          }}
+          onGallery={() => {
+            setSheetOpen(false)
+            galleryInputRef.current?.click()
+          }}
+          onFiles={() => {
+            setSheetOpen(false)
+            fileInputRef.current?.click()
+          }}
+          onPickPhoto={(file) => acceptFiles([file])}
+        />
+      ) : null}
+      <div
+        ref={wrapperRef}
+        className={clsx(styles.wrapper, sessionId === null ? styles.home : styles.session)}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) {
+            textareaRef.current?.focus({ preventScroll: true })
+          }
+        }}
+      >
       <DraftAttachments items={attachments} onRetry={retryFile} onRemove={removeFile} />
       <div className={styles.textareaWrapper}>
         <textarea
@@ -229,14 +275,31 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
               }
             }}
           />
-          <IconButton
-            size="m"
-            tone="primary"
-            icon={<IconPaperclipOutline16 />}
-            tooltip={t('uploadFile')}
-            disabled={importingHistory}
-            onClick={() => ensureApiKey() && fileInputRef.current?.click()}
-          />
+          {isMobile ? (
+            <button
+              type="button"
+              className={clsx(styles.plusButton, sheetOpen && styles.plusButtonOpen)}
+              aria-label={t('uploadFile')}
+              aria-expanded={sheetOpen}
+              disabled={importingHistory}
+              onClick={() => {
+                if (ensureApiKey()) {
+                  setSheetOpen((value) => !value)
+                }
+              }}
+            >
+              <IconPlusOutline16 />
+            </button>
+          ) : (
+            <IconButton
+              size="m"
+              tone="primary"
+              icon={<IconPaperclipOutline16 />}
+              tooltip={t('uploadFile')}
+              disabled={importingHistory}
+              onClick={() => ensureApiKey() && fileInputRef.current?.click()}
+            />
+          )}
           <input
             ref={fileInputRef}
             type="file"
@@ -248,6 +311,32 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
               event.target.value = ''
             }}
           />
+          {isMobile ? (
+            <>
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                hidden
+                onChange={(event) => {
+                  acceptFiles(Array.from(event.target.files ?? []))
+                  event.target.value = ''
+                }}
+              />
+              <input
+                ref={galleryInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={(event) => {
+                  acceptFiles(Array.from(event.target.files ?? []))
+                  event.target.value = ''
+                }}
+              />
+            </>
+          ) : null}
           {streaming && sessionId ? (
             <button
               type="button"
@@ -274,6 +363,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
         </div>
       </div>
       {dragging ? <DragMask /> : null}
-    </div>
+      </div>
+    </>
   )
 }

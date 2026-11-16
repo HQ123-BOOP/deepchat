@@ -523,3 +523,47 @@ export const IconToastError16 = () => (
     />
   </svg>
 )
+
+export const IconPlusOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M7.3 1.4h1.4v5.9h5.9v1.4H8.7v5.9H7.3V8.7H1.4V7.3h5.9V1.4Z"
+      fill="currentColor"
+    />
+  </svg>
+)
+
+export const IconCameraOutline20 = () => (
+  <svg width={20} height={20} viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M7.4 2.8h5.2l1.1 1.7h2.8A2.5 2.5 0 0 1 19 7v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 1 15V7a2.5 2.5 0 0 1 2.5-2.5h2.8l1.1-1.7Zm.9 1.5-1.1 1.7H3.5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-3.7L11.7 4.3H8.3Z"
+      fill="currentColor"
+    />
+    <path
+      d="M10 7.1a4.1 4.1 0 1 1 0 8.2 4.1 4.1 0 0 1 0-8.2Zm0 1.5a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2Z"
+      fill="currentColor"
+    />
+  </svg>
+)
+
+export const IconGalleryOutline20 = () => (
+  <svg width={20} height={20} viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M16.5 2.5h-13A2.5 2.5 0 0 0 1 5v10a2.5 2.5 0 0 0 2.5 2.5h13A2.5 2.5 0 0 0 19 15V5a2.5 2.5 0 0 0-2.5-2.5Zm-13 1.5h13a1 1 0 0 1 1 1v6.9l-2.8-2.8a1.4 1.4 0 0 0-2 0L10.4 11 8.8 9.4a1.4 1.4 0 0 0-2 0L2.5 12.7V5a1 1 0 0 1 1-1Z"
+      fill="currentColor"
+    />
+    <path
+      d="M7 5.8a1.7 1.7 0 1 1 0 3.4 1.7 1.7 0 0 1 0-3.4Z"
+      fill="currentColor"
+    />
+  </svg>
+)
+
+export const IconFileOutline20 = () => (
+  <svg width={20} height={20} viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M11.2 1.8 17 7.6V16a2.4 2.4 0 0 1-2.4 2.4H5.4A2.4 2.4 0 0 1 3 16V3.8a2 2 0 0 1 2-2h6.2Zm-.6 1.5H5a.5.5 0 0 0-.5.5v12.2a.9.9 0 0 0 .9.9h9.2a.9.9 0 0 0 .9-.9V8.1h-3.4a1.5 1.5 0 0 1-1.5-1.5V3.3Z"
+      fill="currentColor"
+    />
+  </svg>
+)

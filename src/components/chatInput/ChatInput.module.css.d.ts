@@ -18,6 +18,8 @@ declare const styles: {
   readonly "toggle": string;
   readonly "selected": string;
   readonly "right": string;
+  readonly "plusButton": string;
+  readonly "plusButtonOpen": string;
   readonly "sendButton": string;
   readonly "disabled": string;
 };
