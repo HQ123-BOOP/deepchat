@@ -103,6 +103,15 @@ class MainActivity : TauriActivity() {
     webViewRef?.post { webViewRef?.evaluateJavascript(script, null) }
   }
 
+  /** 桥只对应用自身页面开放，避免外部网页借 WebView 读取相册或拉起 Intent */
+  private fun isAppPage(): Boolean {
+    val url = webViewRef?.url ?: return false
+    return url.startsWith("https://tauri.localhost") ||
+      url.startsWith("http://tauri.localhost") ||
+      url.startsWith("http://localhost") ||
+      url.startsWith("http://127.0.0.1")
+  }
+
   private fun postRecentPhotos(json: String) {
     postJs("window.__androidRecentPhotos && window.__androidRecentPhotos(${JSONObject.quote(json)})")
   }
@@ -147,6 +156,10 @@ class MainActivity : TauriActivity() {
   inner class MediaBridge {
     @JavascriptInterface
     fun listRecentPhotos(limit: Int) {
+      if (!isAppPage()) {
+        postRecentPhotos("[]")
+        return
+      }
       val max = limit.coerceIn(1, 50)
       if (hasMediaAccess()) {
         queryRecentPhotos(max)
@@ -165,6 +178,13 @@ class MainActivity : TauriActivity() {
 
     @JavascriptInterface
     fun readPhoto(id: String) {
+      if (!isAppPage()) {
+        postJs(
+          "window.__androidPhotoData && window.__androidPhotoData(" +
+            "${JSONObject.quote(id)}, \"\")"
+        )
+        return
+      }
       thread {
         var dataUrl = ""
         try {
@@ -185,6 +205,9 @@ class MainActivity : TauriActivity() {
 
     @JavascriptInterface
     fun openExternal(url: String) {
+      if (!isAppPage()) {
+        return
+      }
       runOnUiThread {
         try {
           startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
