@@ -16,6 +16,7 @@ export const Modal = ({
   footer,
   closable = false,
   className,
+  overlayClassName,
   mainClassName,
   onClose,
 }: {
@@ -25,6 +26,8 @@ export const Modal = ({
   /** 标题栏右侧显示关闭按钮 */
   closable?: boolean
   className?: string
+  /** 遮罩层的 class，用于整体淡入淡出等动画 */
+  overlayClassName?: string
   /** 内容区的 class */
   mainClassName?: string
   onClose: () => void
@@ -50,7 +53,7 @@ export const Modal = ({
 
   return createPortal(
     <div
-      className={styles.overlay}
+      className={clsx(styles.overlay, overlayClassName)}
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
       <div

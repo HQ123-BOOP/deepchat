@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
+  IconCheckOutline16,
   IconDarkOutline16,
   IconDataOutline16,
   IconDownloadOutline16,
@@ -31,14 +32,15 @@ import {
   INPUT_MODALITIES,
   isChineseBrowser,
   PI_APIS,
-  setLocale,
-  setProviderConfig,
+  setLocalePreference,
   setLocation,
+  setProviderConfig,
   setThemePreference,
   setTtsVoice,
   setUpdateInterval,
   useSettings,
   type InputModality,
+  type LocalePreference,
   type ThemePreference,
   type UpdateInterval,
 } from '../../services/settings.js'
@@ -56,6 +58,7 @@ import {
   isModelReady,
 } from '../../services/speech/localAsr.js'
 import { closeSettings, useSettingsDialog, type SettingsSection } from './settingsDialogState.js'
+import { useIsMobile } from '../../app/viewport.js'
 import styles from './Settings.module.css'
 
 /**
@@ -85,18 +88,27 @@ const SettingsContent = () => {
   const historyDelete = useHistoryDelete()
   const replacingHistory = useChatStore((state) => state.importingHistory)
   const historyBusy = historyImport.busy || historyDelete.busy || replacingHistory
+  const isMobile = useIsMobile()
+  // 关闭时先播完动画再卸载：移动端上滑收起，桌面端淡出
+  const [closing, setClosing] = useState(false)
+  const closeTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(closeTimer.current), [])
+  const close = () => {
+    if (historyDelete.busy || closing) {
+      return
+    }
+    setClosing(true)
+    closeTimer.current = window.setTimeout(closeSettings, isMobile ? 280 : 200)
+  }
   return (
     <>
       <Modal
         title={t('settings')}
         closable
-        className={styles.dialog}
+        className={clsx(styles.dialog, closing && styles.dialogClosing)}
+        overlayClassName={clsx(styles.overlay, closing && styles.overlayClosing)}
         mainClassName={styles.dialogMain}
-        onClose={() => {
-          if (!historyDelete.busy) {
-            closeSettings()
-          }
-        }}
+        onClose={close}
       >
         <div role="tablist" className={styles.navigation}>
           {sections.map((item) => (
@@ -291,25 +303,73 @@ const LocationSetting = () => {
   )
 }
 
+const localeOptions: { value: LocalePreference; label: TranslationKey }[] = [
+  { value: 'system', label: 'settingsLocaleSystem' },
+  { value: 'zh-CN', label: 'settingsLocaleZhCN' },
+  { value: 'en-US', label: 'settingsLocaleEnUS' },
+]
+
+/** 语言：点当前语言弹出选择框，选中后立即生效 */
 const LocaleSetting = () => {
   const t = useTranslate()
-  const locale = useSettings((state) => state.locale)
+  const preference = useSettings((state) => state.localePreference)
+  const [opened, setOpened] = useState(false)
+  const current = localeOptions.find((option) => option.value === preference) ?? localeOptions[0]
   return (
-    <SettingCell
-      label={t('settingsLocalePreference')}
-      status={null}
-      action={
-        <Select
-          ariaLabel={t('settingsLocalePreference')}
-          value={locale}
-          options={[
-            { value: 'zh-CN', label: t('settingsLocaleZhCN'), lang: 'zh-CN' },
-            { value: 'en-US', label: t('settingsLocaleEnUS'), lang: 'en' },
-          ]}
-          onChange={setLocale}
-        />
-      }
-    />
+    <>
+      <SettingCell
+        label={t('settingsLocalePreference')}
+        status={null}
+        action={
+          <Button
+            variant="outlined"
+            size="m"
+            className={styles.cellButton}
+            aria-haspopup="dialog"
+            onClick={() => setOpened(true)}
+          >
+            {t(current.label)}
+          </Button>
+        }
+      />
+      {opened ? (
+        <Modal
+          title={t('settingsLocalePreference')}
+          className={styles.languageDialog}
+          onClose={() => setOpened(false)}
+        >
+          <div
+            role="radiogroup"
+            aria-label={t('settingsLocalePreference')}
+            className={styles.languageOptions}
+          >
+            {localeOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={preference === option.value}
+                className={clsx(
+                  styles.languageOption,
+                  preference === option.value && styles.languageOptionSelected
+                )}
+                onClick={() => {
+                  setLocalePreference(option.value)
+                  setOpened(false)
+                }}
+              >
+                <span className={styles.languageOptionLabel}>{t(option.label)}</span>
+                {preference === option.value ? (
+                  <span className={styles.languageOptionCheck}>
+                    <IconCheckOutline16 />
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </Modal>
+      ) : null}
+    </>
   )
 }
 

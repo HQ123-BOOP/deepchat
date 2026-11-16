@@ -4,6 +4,9 @@ import { normalizeLocation, type UserLocation } from './location.js'
 
 export type Locale = 'zh-CN' | 'en-US'
 
+/** 界面语言偏好：system 表示跟随系统，系统语言不是中文时用英文 */
+export type LocalePreference = Locale | 'system'
+
 /** 主题偏好；默认跟随系统 */
 export type ThemePreference = 'light' | 'dark' | 'system'
 
@@ -84,6 +87,7 @@ type Settings = {
   apiKey: string | null
   provider: ProviderConfig
   locale: Locale
+  localePreference: LocalePreference
   themePreference: ThemePreference
   location: UserLocation | null
   ttsVoice: TtsVoice
@@ -97,6 +101,7 @@ const KEYS = {
   apiKey: 'chat-demo:api-key',
   provider: 'chat-demo:provider',
   locale: 'chat-demo:locale',
+  localePreference: 'chat-demo:locale-preference',
   location: 'chat-demo:location',
   themePreference: 'chat-demo:theme-preference',
   ttsVoice: 'chat-demo:tts-voice',
@@ -131,27 +136,49 @@ const write = (key: string, value: string | null) => {
 export const isChineseBrowser = (): boolean =>
   (typeof navigator === 'undefined' ? 'zh' : navigator.language).toLowerCase().startsWith('zh')
 
-const initialLocale = (): Locale => {
-  const saved = read(KEYS.locale)
-  if (saved === 'zh-CN' || saved === 'en-US') {
-    return saved
-  }
-  return isChineseBrowser() ? 'zh-CN' : 'en-US'
+/** 系统语言：任一系统语言是中文就用简体中文，匹配不上统一走英文 */
+export const systemLocale = (): Locale => {
+  const languages =
+    typeof navigator === 'undefined' || !navigator.languages?.length
+      ? [typeof navigator === 'undefined' ? 'en' : navigator.language]
+      : navigator.languages
+  return languages.some((language) => language.toLowerCase().startsWith('zh')) ? 'zh-CN' : 'en-US'
 }
 
-const initialLocation = (): UserLocation | null => {
+/** 未保存过时跟随系统；旧版保存过具体语言则迁移为同等偏好 */
+const initialLocalePreference = (): LocalePreference => {
+  const saved = read(KEYS.localePreference)
+  if (saved === 'system' || saved === 'zh-CN' || saved === 'en-US') {
+    return saved
+  }
+  const legacy = read(KEYS.locale)
+  return legacy === 'zh-CN' || legacy === 'en-US' ? legacy : 'system'
+}
+
+const initialLocaleState = () => {
+  const localePreference = initialLocalePreference()
+  return {
+    localePreference,
+    locale: localePreference === 'system' ? systemLocale() : localePreference,
+  }
+}
+
+/** 未选择位置时的默认值：北京市 */
+const DEFAULT_LOCATION: UserLocation = { region: 'CN', province: '110000', city: '110100' }
+
+const initialLocation = (): UserLocation => {
   try {
     const location = normalizeLocation(JSON.parse(read(KEYS.location) ?? 'null'))
     if (!location) {
-      return null
+      return DEFAULT_LOCATION
     }
     return isChineseBrowser()
       ? location.region === 'CN' && location.province
         ? location
-        : null
+        : DEFAULT_LOCATION
       : { region: location.region }
   } catch {
-    return null
+    return DEFAULT_LOCATION
   }
 }
 
@@ -221,7 +248,7 @@ const initialUpdateInterval = (): UpdateInterval => {
 export const useSettings = create<Settings>(() => ({
   apiKey: read(KEYS.apiKey),
   provider: initialProvider(),
-  locale: initialLocale(),
+  ...initialLocaleState(),
   location: initialLocation(),
   themePreference: initialThemePreference(),
   ttsVoice: initialTtsVoice(),
@@ -231,9 +258,21 @@ export const useSettings = create<Settings>(() => ({
   updateInterval: initialUpdateInterval(),
 }))
 
-export const setLocale = (locale: Locale) => {
-  write(KEYS.locale, locale)
-  useSettings.setState({ locale })
+export const setLocalePreference = (localePreference: LocalePreference) => {
+  write(KEYS.localePreference, localePreference)
+  useSettings.setState({
+    localePreference,
+    locale: localePreference === 'system' ? systemLocale() : localePreference,
+  })
+}
+
+/** 跟随系统时，系统语言变化要重新解析界面语言 */
+if (typeof window !== 'undefined') {
+  window.addEventListener('languagechange', () => {
+    if (useSettings.getState().localePreference === 'system') {
+      useSettings.setState({ locale: systemLocale() })
+    }
+  })
 }
 
 export const setLocation = (value: UserLocation | null) => {

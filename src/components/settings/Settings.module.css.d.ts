@@ -1,5 +1,14 @@
 declare const styles: {
   readonly "dialog": string;
+  readonly "overlay": string;
+  readonly "overlayClosing": string;
+  readonly "dialogClosing": string;
+  readonly "languageDialog": string;
+  readonly "languageOptions": string;
+  readonly "languageOption": string;
+  readonly "languageOptionSelected": string;
+  readonly "languageOptionLabel": string;
+  readonly "languageOptionCheck": string;
   readonly "dialogMain": string;
   readonly "navigation": string;
   readonly "navItem": string;
