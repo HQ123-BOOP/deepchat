@@ -7,7 +7,7 @@ import { setSiderCollapsed } from '../../services/settings.js'
 import { appVersion } from '../../services/updates.js'
 import { openExternal } from '../../services/nativeMedia.js'
 import { groupSessions } from '../../services/chat/sessionGroups.js'
-import { newChat, removeSession, useChatStore } from '../../services/chat/store.js'
+import { loadMoreSessions, newChat, removeSession, useChatStore } from '../../services/chat/store.js'
 import type { SessionSummary } from '../../services/chat/types.js'
 import { Button } from '../base/Button.js'
 import { IconButton } from '../base/IconButton.js'
@@ -25,6 +25,8 @@ const PROJECT_URL = 'https://github.com/HQ123-BOOP/deepchat'
 export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const t = useTranslate()
   const sessions = useChatStore((state) => state.sessions)
+  const sessionsHasMore = useChatStore((state) => state.sessionsHasMore)
+  const sessionsLoadingMore = useChatStore((state) => state.sessionsLoadingMore)
   const activeId = useChatStore((state) => state.activeId)
   const [now, setNow] = useState(Date.now)
   const groups = useMemo(() => groupSessions(sessions, now, t), [sessions, now, t])
@@ -103,7 +105,18 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
         {t('newChat')}
       </button>
       <div className={styles.listWrap}>
-        <div className={styles.list}>
+        <div
+          className={styles.list}
+          onScroll={(event) => {
+            if (!sessionsHasMore || sessionsLoadingMore) {
+              return
+            }
+            const element = event.currentTarget
+            if (element.scrollTop + element.clientHeight >= element.scrollHeight - 240) {
+              void loadMoreSessions()
+            }
+          }}
+        >
           <div className={styles.group}>
             <button
               type="button"
@@ -131,6 +144,16 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
               </div>
             </div>
           </div>
+          {sessionsHasMore ? (
+            <button
+              type="button"
+              className={styles.loadMore}
+              disabled={sessionsLoadingMore}
+              onClick={() => void loadMoreSessions()}
+            >
+              {t(sessionsLoadingMore ? 'sessionLoading' : 'sessionLoadMore')}
+            </button>
+          ) : null}
         </div>
       </div>
       <div className={styles.bottom}>

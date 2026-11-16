@@ -29,6 +29,8 @@ import {
   type UserMessage,
 } from './types.js'
 
+/** 侧边栏每页加载的会话数；避免上万条对话一次性进内存。 */
+const SESSION_PAGE_SIZE = 100
 /** 保留最近打开的详情；当前会话、生成中及尚未成功保存的会话不淘汰。 */
 const SESSION_CACHE_LIMIT = 5
 /** 单张内联图片上限 32 MiB，超过则只登记清单，交由 ocr_file 按需读取 */
@@ -39,8 +41,11 @@ type ChatState = {
   initError: boolean
   /** 历史导入或全部删除期间锁定交互，提交成功前仍展示原有记录。 */
   importingHistory: boolean
-  /** 仅列表元数据，按 updatedAt 降序；流式消息更新不会改变此数组。 */
+  /** 仅已加载的列表元数据，按 updatedAt 降序；流式消息更新不会改变此数组。 */
   sessions: SessionSummary[]
+  /** 还有更早的会话没有加载 */
+  sessionsHasMore: boolean
+  sessionsLoadingMore: boolean
   sessionCache: Record<string, Session>
   sessionLoadErrors: Record<string, boolean>
   sessionSaveErrors: Record<string, boolean>
@@ -55,6 +60,8 @@ export const useChatStore = create<ChatState>(() => ({
   initError: false,
   importingHistory: false,
   sessions: [],
+  sessionsHasMore: false,
+  sessionsLoadingMore: false,
   sessionCache: {},
   sessionLoadErrors: {},
   sessionSaveErrors: {},
@@ -275,9 +282,14 @@ export const initChat = (): Promise<void> => {
   set({ initError: false })
   initTask = (async () => {
     try {
-      const summaries = await db.loadSessionSummaries()
+      const summaries = await db.loadSessionSummariesPage(SESSION_PAGE_SIZE)
       if (epoch === historyEpoch) {
-        set({ ready: true, sessions: sortSessions(summaries) })
+        set({
+          ready: true,
+          sessions: sortSessions(summaries),
+          sessionsHasMore: summaries.length === SESSION_PAGE_SIZE,
+          sessionsLoadingMore: false,
+        })
       }
     } catch (error) {
       if (epoch === historyEpoch) {
@@ -291,6 +303,45 @@ export const initChat = (): Promise<void> => {
     }
   })()
   return initTask
+}
+
+/** 侧边栏滚动到底部时取下一页；以最后一项的 (updatedAt, id) 作游标，不重复不漏项。 */
+export const loadMoreSessions = async (): Promise<void> => {
+  const current = get()
+  if (
+    !current.ready ||
+    !current.sessionsHasMore ||
+    current.sessionsLoadingMore ||
+    current.importingHistory
+  ) {
+    return
+  }
+  const before = current.sessions.at(-1)
+  if (!before) {
+    return
+  }
+  const epoch = historyEpoch
+  set({ sessionsLoadingMore: true })
+  try {
+    const summaries = await db.loadSessionSummariesPage(SESSION_PAGE_SIZE, before)
+    if (epoch !== historyEpoch) {
+      return
+    }
+    const known = new Set(get().sessions.map((session) => session.id))
+    const added = summaries.filter((session) => !known.has(session.id))
+    set((state) => ({
+      sessions: [...state.sessions, ...added],
+      sessionsHasMore: added.length > 0 && summaries.length === SESSION_PAGE_SIZE,
+    }))
+  } catch (error) {
+    if (epoch === historyEpoch) {
+      db.reportStorageError('load more sessions')(error)
+    }
+  } finally {
+    if (epoch === historyEpoch) {
+      set({ sessionsLoadingMore: false })
+    }
+  }
 }
 
 /** 同一会话合并并发读取；切换只改变 activeId，旧请求不会把界面切回去。 */
@@ -396,7 +447,9 @@ export const replaceHistory = async (write: () => Promise<void>): Promise<number
     set({
       ready: true,
       initError: false,
-      sessions: sortSessions(summaries),
+      sessions: sortSessions(summaries.slice(0, SESSION_PAGE_SIZE)),
+      sessionsHasMore: summaries.length > SESSION_PAGE_SIZE,
+      sessionsLoadingMore: false,
       sessionCache: {},
       sessionLoadErrors: {},
       sessionSaveErrors: {},

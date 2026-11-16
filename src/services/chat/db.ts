@@ -2,7 +2,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import { toSessionSummary, type Session, type SessionSummary } from './types.js'
 
 /** IndexedDB 存储结构版本；新增或调整存储、索引时递增。 */
-const DB_VERSION = 12
+const DB_VERSION = 13
 
 /** 文件原件按附件的本地 id 存储，所有引用同一 id 的消息共用一份；用于缩略图、打开查看，以及没有 serverId 时补传。 */
 export type StoredFile = {
@@ -32,7 +32,7 @@ interface ChatDB extends DBSchema {
   sessionSummaries: {
     key: string
     value: StoredSessionSummary
-    indexes: { fileIds: string }
+    indexes: { fileIds: string; updatedAtId: [number, string] }
   }
   /** 当前使用的文件原件 */
   files: { key: string; value: StoredFile }
@@ -89,6 +89,10 @@ const getDB = () =>
       if (!summaries.indexNames.contains('fileIds')) {
         summaries.createIndex('fileIds', 'fileIds', { multiEntry: true })
       }
+      // 会话列表按时间倒序分页读取；带上 id 避免相同时间戳的分页边界丢记录
+      if (!summaries.indexNames.contains('updatedAtId')) {
+        summaries.createIndex('updatedAtId', ['updatedAt', 'id'])
+      }
     },
   }).catch((error: unknown) => {
     // 打开失败后允许界面重试，避免一直复用已拒绝的 Promise。
@@ -98,6 +102,28 @@ const getDB = () =>
 
 export const loadSessionSummaries = async (): Promise<SessionSummary[]> =>
   (await (await getDB()).getAll('sessionSummaries')).map(toSessionSummary)
+
+/**
+ * 按 updatedAt 倒序分页取会话摘要；before 为上一页最后一项。
+ * 只走索引游标，不把整张表读进内存。
+ */
+export const loadSessionSummariesPage = async (
+  limit: number,
+  before?: { updatedAt: number; id: string }
+): Promise<SessionSummary[]> => {
+  const db = await getDB()
+  const index = db.transaction('sessionSummaries').store.index('updatedAtId')
+  const range = before
+    ? IDBKeyRange.upperBound([before.updatedAt, before.id], true)
+    : undefined
+  const summaries: SessionSummary[] = []
+  let cursor = await index.openCursor(range, 'prev')
+  while (cursor && summaries.length < limit) {
+    summaries.push(toSessionSummary(cursor.value))
+    cursor = await cursor.continue()
+  }
+  return summaries
+}
 
 export const loadSession = async (id: string): Promise<Session | undefined> =>
   (await getDB()).get('sessions', id)

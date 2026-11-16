@@ -122,6 +122,29 @@
   scrollbar-color: var(--scroll-color) transparent;
 }
 
+/* 分批加载：滚动到底部或在下方点一下取更早的会话 */
+.loadMore {
+  display: block;
+  width: 100%;
+  margin: 4px 0 16px;
+  padding: 10px 0;
+  border: 0;
+  color: var(--dsw-alias-label-tertiary);
+  background: transparent;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    color: var(--dsw-alias-label-secondary);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
 .section {
   position: relative;
   margin-top: 16px;
