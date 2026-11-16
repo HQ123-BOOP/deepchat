@@ -381,6 +381,21 @@ const formatTokens = (value: number): string =>
       ? `${Math.round(value / 1000)}k`
       : String(value)
 
+/** 输入框里的 token 数：1m / 1000K / 1000000 都归一成 1000000 */
+const parseTokens = (value: string): number | null => {
+  const match = /^(\d+(?:\.\d+)?)\s*([kKmM]?)$/.exec(value.trim())
+  if (!match) {
+    return null
+  }
+  const amount = Number(match[1])
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null
+  }
+  const unit = match[2].toLowerCase()
+  const tokens = Math.round(amount * (unit === 'm' ? 1_000_000 : unit === 'k' ? 1000 : 1))
+  return Number.isSafeInteger(tokens) && tokens > 0 ? tokens : null
+}
+
 type CatalogModel = {
   id: string
   name: string
@@ -425,6 +440,8 @@ const ProviderSetting = () => {
   const t = useTranslate()
   const provider = useSettings((state) => state.provider)
   const fieldStyle = { marginTop: 8 } as const
+  // 编辑中的上下文输入保留原文，失焦后再归一显示为 1M / 384k
+  const [contextDraft, setContextDraft] = useState<string | null>(null)
 
   const providers = useMemo(
     () =>
@@ -432,6 +449,7 @@ const ProviderSetting = () => {
         value: item.id,
         label: item.name || item.id,
         description: item.name && item.name !== item.id ? item.id : undefined,
+        baseUrl: item.baseUrl ?? '',
       })),
     []
   )
@@ -464,10 +482,13 @@ const ProviderSetting = () => {
       piProvider,
       ...(matched ? { model: matched.id } : {}),
       ...(api ? { piApi: api } : {}),
+      // 内置提供商带官方端点，切换时一并填上，避免沿用上一个提供商的地址
+      piBaseUrl: providers.find((item) => item.value === piProvider)?.baseUrl ?? '',
       contextWindow: null,
       maxTokens: null,
       inputModalities: null,
     })
+    setContextDraft(null)
   }
 
   /** 选目录模型时同步协议，并把容量与模态交回自动匹配 */
@@ -481,6 +502,7 @@ const ProviderSetting = () => {
       maxTokens: null,
       inputModalities: null,
     })
+    setContextDraft(null)
   }
 
   const toggleModality = (modality: InputModality) => {
@@ -568,16 +590,16 @@ const ProviderSetting = () => {
       </div>
       <div className={styles.apiKeyInput} style={{ marginTop: 8 }}>
         <input
-          inputMode="numeric"
+          inputMode="text"
           placeholder={t('settingsProviderAuto')}
           autoComplete="off"
           spellCheck={false}
-          value={provider.contextWindow ?? ''}
+          value={contextDraft ?? (provider.contextWindow === null ? '' : formatTokens(provider.contextWindow))}
+          onBlur={() => setContextDraft(null)}
           onChange={(event) => {
-            const value = Number(event.target.value)
-            setProviderConfig({
-              contextWindow: Number.isFinite(value) && value > 0 ? Math.trunc(value) : null,
-            })
+            const raw = event.target.value
+            setContextDraft(raw)
+            setProviderConfig({ contextWindow: parseTokens(raw) })
           }}
         />
       </div>
