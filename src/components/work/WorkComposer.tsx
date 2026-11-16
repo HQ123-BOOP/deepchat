@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { IconPaperclipOutline16, IconSendOutline16 } from '../base/icons.js'
+import { useAnchoredPosition, useDismiss } from '../base/anchored.js'
 import { IconButton } from '../base/IconButton.js'
 import { Tooltip } from '../base/Tooltip.js'
 import { useTranslate } from '../../i18n/index.js'
@@ -45,6 +47,12 @@ const ConfigMenu = () => {
   const applyConfig = useWorkStore((state) => state.applyConfig)
   const busy = useWorkStore((state) => state.configBusy)
   const [open, setOpen] = useState(false)
+  // 与其他浮层一致：挂到 body 避开祖先裁切，空间不足自动翻面
+  const { anchorRef, floatingRef, position } = useAnchoredPosition<
+    HTMLButtonElement,
+    HTMLDivElement
+  >(open, { side: 'top', align: 'start', offset: 8 })
+  useDismiss(open, [anchorRef, floatingRef], () => setOpen(false))
 
   const model = config.find((option) => option.id === 'model')
   const effort = config.find((option) => option.id === 'reasoning_effort')
@@ -53,68 +61,75 @@ const ConfigMenu = () => {
   }
 
   return (
-    <div className={styles.menuWrap}>
+    <>
       <button
+        ref={anchorRef}
         type="button"
         className={styles.trigger}
-        onClick={() => setOpen((value) => !value)}
+        aria-haspopup="menu"
         aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
       >
         {[modelName(model), effortName(effort)].filter(Boolean).join(' · ') || t('workConfig')}
         <span className={styles.chevron}>⌃</span>
       </button>
-      {open ? (
-        <>
-          <div className={styles.menuMask} onClick={() => setOpen(false)} />
-          <div className={styles.menu} role="menu">
-            {model ? (
-              <div className={styles.row}>
-                <div className={styles.rowLabel}>{t('workConfigModel')}</div>
-                <div className={styles.chips}>
-                  {flatten(model.options).map((item) => (
-                    <button
-                      key={item.value}
-                      type="button"
-                      disabled={busy}
-                      className={
-                        item.value === model.currentValue ? styles.chipActive : styles.chip
-                      }
-                      onClick={() => void applyConfig('model', item.value)}
-                    >
-                      {item.name}
-                    </button>
-                  ))}
+      {open
+        ? createPortal(
+            <div
+              ref={floatingRef}
+              className={styles.menu}
+              style={position ?? undefined}
+              role="menu"
+            >
+              {model ? (
+                <div className={styles.row}>
+                  <div className={styles.rowLabel}>{t('workConfigModel')}</div>
+                  <div className={styles.chips}>
+                    {flatten(model.options).map((item) => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        disabled={busy}
+                        className={
+                          item.value === model.currentValue ? styles.chipActive : styles.chip
+                        }
+                        onClick={() => void applyConfig('model', item.value)}
+                      >
+                        {item.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ) : null}
-            {effort ? (
-              <div className={styles.row}>
-                <div className={styles.rowLabel}>{t('workConfigEffort')}</div>
-                <div className={styles.chips}>
-                  {flatten(effort.options).map((item) => (
-                    <button
-                      key={item.value}
-                      type="button"
-                      disabled={busy}
-                      className={
-                        item.value === effort.currentValue ? styles.chipActive : styles.chip
-                      }
-                      onClick={() => void applyConfig('reasoning_effort', item.value)}
-                    >
-                      {item.name}
-                    </button>
-                  ))}
+              ) : null}
+              {effort ? (
+                <div className={styles.row}>
+                  <div className={styles.rowLabel}>{t('workConfigEffort')}</div>
+                  <div className={styles.chips}>
+                    {flatten(effort.options).map((item) => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        disabled={busy}
+                        className={
+                          item.value === effort.currentValue ? styles.chipActive : styles.chip
+                        }
+                        onClick={() => void applyConfig('reasoning_effort', item.value)}
+                      >
+                        {item.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+              ) : null}
+              <div className={styles.row}>
+                <div className={styles.rowLabel}>{t('workConfigTeam')}</div>
+                <div className={styles.rowHint}>{t('workConfigTeamUnavailable')}</div>
               </div>
-            ) : null}
-            <div className={styles.row}>
-              <div className={styles.rowLabel}>{t('workConfigTeam')}</div>
-              <div className={styles.rowHint}>{t('workConfigTeamUnavailable')}</div>
-            </div>
-          </div>
-        </>
-      ) : null}
-    </div>
+            </div>,
+            document.body
+          )
+        : null}
+    </>
   )
 }
 

@@ -3,10 +3,8 @@ declare const styles: {
   readonly "controls": string;
   readonly "spacer": string;
   readonly "send": string;
-  readonly "menuWrap": string;
   readonly "trigger": string;
   readonly "chevron": string;
-  readonly "menuMask": string;
   readonly "menu": string;
   readonly "row": string;
   readonly "rowLabel": string;
