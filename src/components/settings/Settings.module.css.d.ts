@@ -29,6 +29,13 @@ declare const styles: {
   readonly "modalities": string;
   readonly "modality": string;
   readonly "modalityLocked": string;
+  readonly "progress": string;
+  readonly "progressBar": string;
+  readonly "progressText": string;
+  readonly "progressTrack": string;
+  readonly "range": string;
+  readonly "rangeInput": string;
+  readonly "rangeRow": string;
   readonly "divider": string;
   readonly "confirm": string;
   readonly "cellButton": string;

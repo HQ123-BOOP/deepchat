@@ -237,9 +237,15 @@ export type ArchiveEntry = {
 /**
  * 按条目在文件中的物理顺序逐条、逐块解压，跳过目录条目。
  * 调用方必须消费完当前条目的数据，再请求下一个条目。
+ * onProgress 在每条数据处理完成后回调，total 为不含目录的条目总数。
  */
-export async function* readArchive(file: File): AsyncGenerator<ArchiveEntry> {
+export async function* readArchive(
+  file: File,
+  onProgress?: (done: number, total: number) => void
+): AsyncGenerator<ArchiveEntry> {
   const directory = await readDirectory(file)
+  const total = directory.entries.filter((entry) => !entry.path.endsWith('/')).length
+  let done = 0
   for (const [index, entry] of directory.entries.entries()) {
     const boundary = directory.entries[index + 1]?.offset ?? directory.offset
     const start = await readEntryOffset(file, entry, boundary)
@@ -295,6 +301,8 @@ export async function* readArchive(file: File): AsyncGenerator<ArchiveEntry> {
     if (!completed) {
       invalid()
     }
+    done += 1
+    onProgress?.(done, total)
   }
 }
 

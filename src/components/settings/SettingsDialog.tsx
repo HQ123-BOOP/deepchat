@@ -15,7 +15,15 @@ import {
   clearHistory,
   exportHistory,
   importHistory,
+  type BackupProgress,
 } from '../../services/chat/backup.js'
+import {
+  DEFAULT_RANGE,
+  RangePicker,
+  RangeProgress,
+  toBackupRange,
+  type RangeState,
+} from './BackupRange.js'
 import { useChatStore } from '../../services/chat/store.js'
 import { regionCodes, getRegionName, provinces } from '../../services/location.js'
 import {
@@ -712,16 +720,36 @@ const ImportConfirm = ({
       onClose={historyImport.cancel}
       footer={
         <>
-          <Button variant="outlined" size="m" autoFocus onClick={historyImport.cancel}>
+          <Button
+            variant="outlined"
+            size="m"
+            autoFocus
+            disabled={historyImport.busy}
+            onClick={historyImport.cancel}
+          >
             {t('cancel')}
           </Button>
-          <Button variant="dangerOutlined" size="m" onClick={() => void historyImport.confirm()}>
-            {t('historyImportConfirm')}
+          <Button
+            variant="dangerOutlined"
+            size="m"
+            disabled={historyImport.busy}
+            onClick={() => void historyImport.confirm()}
+          >
+            {t(historyImport.busy ? 'historyImporting' : 'historyImportConfirm')}
           </Button>
         </>
       }
     >
       <div className={styles.importConfirmText}>{t('historyImportConfirmDescription')}</div>
+      <div className={styles.label} style={{ marginTop: 16 }}>
+        {t('historyRangeLabel')}
+      </div>
+      <RangePicker
+        value={historyImport.range}
+        onChange={historyImport.setRange}
+        disabled={historyImport.busy}
+      />
+      <RangeProgress progress={historyImport.progress} />
     </Modal>
   )
 }
@@ -823,30 +851,60 @@ const SettingCell = ({
 /** 选文件后先提示覆盖；确认后才检查文件并执行导入，任何错误都提示导入失败。 */
 const useHistoryImport = () => {
   const [file, setFile] = useState<File | null>(null)
+  const [range, setRange] = useState<RangeState>(DEFAULT_RANGE)
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState<BackupProgress | null>(null)
   const [status, setStatus] = useState<Status>(null)
   const importing = useRef(false)
+
+  const select = (next: File) => {
+    setFile(next)
+    setRange(DEFAULT_RANGE)
+    setStatus(null)
+    setProgress(null)
+  }
 
   const confirm = async () => {
     if (!file || importing.current) {
       return
     }
     importing.current = true
-    setFile(null)
     setBusy(true)
     setStatus(null)
+    setProgress(null)
     try {
-      const count = await importHistory(file)
+      const count = await importHistory(file, {
+        range: toBackupRange(range),
+        onProgress: setProgress,
+      })
       setStatus({ key: count === 1 ? 'historyImportedOne' : 'historyImported', params: { count } })
-    } catch {
-      setStatus({ key: 'historyImportFailed', error: true })
+    } catch (error) {
+      setStatus(errorStatus('historyImportFailed', error))
     } finally {
       importing.current = false
       setBusy(false)
+      setProgress(null)
+      // 结束后再关弹窗，进度条在导入期间保持可见
+      setFile(null)
     }
   }
 
-  return { file, busy, status, select: setFile, cancel: () => setFile(null), confirm }
+  return {
+    file,
+    range,
+    setRange,
+    busy,
+    progress,
+    status,
+    select,
+    cancel: () => {
+      if (!importing.current) {
+        setFile(null)
+        setProgress(null)
+      }
+    },
+    confirm,
+  }
 }
 
 /** 导入 = 覆盖：用选中文件替换本地全部会话与附件。 */
@@ -896,48 +954,93 @@ const ImportHistory = ({
   )
 }
 
-/** 将全部会话及图片导出为 ZIP 文件并下载 */
+/** 按范围把会话及图片导出为 ZIP 并下载 */
 const ExportHistory = ({ disabled }: { disabled: boolean }) => {
   const t = useTranslate()
   const empty = useChatStore((state) => state.sessions.length === 0)
+  const [opened, setOpened] = useState(false)
+  const [range, setRange] = useState<RangeState>(DEFAULT_RANGE)
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState<BackupProgress | null>(null)
   const [status, setStatus] = useState<Status>(null)
+
+  const close = () => {
+    if (!busy) {
+      setOpened(false)
+    }
+  }
 
   const onExport = async () => {
     setBusy(true)
+    setProgress(null)
     setStatus(null)
     try {
-      const { name, blob } = await exportHistory()
+      const { name, blob } = await exportHistory({
+        range: toBackupRange(range),
+        onProgress: setProgress,
+      })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
       link.download = name
       link.click()
       setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      setOpened(false)
+      showToast({ key: 'historyExported' })
     } catch (error) {
       setStatus(errorStatus('historyExportFailed', error))
     } finally {
       setBusy(false)
+      setProgress(null)
     }
   }
 
   return (
-    <SettingCell
-      label={t('exportAllLabel')}
-      description={t('historyExportDescription')}
-      status={status}
-      action={
-        <Button
-          variant="outlined"
-          size="m"
-          className={styles.cellButton}
-          disabled={disabled || busy || empty}
-          onClick={() => void onExport()}
+    <>
+      <SettingCell
+        label={t('exportAllLabel')}
+        description={t('historyExportDescription')}
+        status={status}
+        action={
+          <Button
+            variant="outlined"
+            size="m"
+            className={styles.cellButton}
+            disabled={disabled || empty}
+            onClick={() => {
+              setStatus(null)
+              setOpened(true)
+            }}
+          >
+            <IconDownloadOutline16 />
+            {t('exportAllDownload')}
+          </Button>
+        }
+      />
+      {opened ? (
+        <Modal
+          title={t('historyExportRangeTitle')}
+          className={styles.importConfirm}
+          onClose={close}
+          footer={
+            <>
+              <Button variant="outlined" size="m" autoFocus disabled={busy} onClick={close}>
+                {t('cancel')}
+              </Button>
+              <Button variant="primary" size="m" disabled={busy} onClick={() => void onExport()}>
+                {t(busy ? 'historyExporting' : 'historyExportConfirm')}
+              </Button>
+            </>
+          }
         >
-          <IconDownloadOutline16 />
-          {t('exportAllDownload')}
-        </Button>
-      }
-    />
+          <div className={styles.importConfirmText}>{t('historyExportRangeDescription')}</div>
+          <div className={styles.label} style={{ marginTop: 16 }}>
+            {t('historyRangeLabel')}
+          </div>
+          <RangePicker value={range} onChange={setRange} disabled={busy} />
+          <RangeProgress progress={progress} />
+        </Modal>
+      ) : null}
+    </>
   )
 }

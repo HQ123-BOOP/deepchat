@@ -2,8 +2,9 @@ import * as db from '../db.js'
 import { BackupError, fail } from './errors.js'
 import type { SessionIndexEntry } from './format.js'
 import { INDEX_PATH, MANIFEST_PATH, USER_PATH, parseSessionPath, sessionFilesDir } from './paths.js'
+import { selectInRange, type BackupOptions } from './range.js'
 import { checkManifest, readSessionFile, readSessionIndex } from './schema.js'
-import { toLocalSession } from './toLocal.js'
+import { toLocalSession, type LocalSession } from './toLocal.js'
 import {
   ArchiveError,
   isZipFile,
@@ -75,10 +76,12 @@ export const checkArchiveFormat = async (file: File): Promise<void> => {
 /**
  * 流式导入：manifest → user（不导入）→ 全部会话 JSON → index → 全部图片。
  * 也支持会话与图片交错排列、index 位于末尾的条目顺序。
- * 会话读完立即暂存，只保留图片路径映射；图片全部读完后逐会话回填 MIME，不改变图片身份。
- * 写入导入暂存存储；调用方负责先清空暂存，成功后替换正式数据，失败时清理暂存。
+ *
+ * 范围为「全部」时读到会话立即暂存，内存占用最小；
+ * 指定天数或条数时先把会话留在内存，读完 index 后按 updatedAt 筛选再暂存，
+ * 因此需要标准条目顺序（index 在图片之前），否则图片会被跳过。
  */
-export const importArchive = async (file: File): Promise<void> => {
+export const importArchive = async (file: File, options: BackupOptions): Promise<void> => {
   if (!(await isZipFile(file))) {
     fail('backupUnrecognized')
   }
@@ -86,9 +89,12 @@ export const importArchive = async (file: File): Promise<void> => {
   const images = new Map<string, string>()
   /** 已保存的原件：文件 ID → MIME。同一图片出现在多个会话目录时只保存一次。 */
   const stored = new Map<string, string>()
+  const streaming = options.range.kind === 'all'
+  const pending: LocalSession[] = []
   let manifest = false
   let index: SessionIndexEntry[] | undefined
   let currentSessionId: string | undefined
+  let kept = 0
 
   const saveImage = async (entry: ArchiveEntry, id: string) => {
     if (stored.has(id)) {
@@ -101,8 +107,37 @@ export const importArchive = async (file: File): Promise<void> => {
     stored.set(id, type)
   }
 
+  /** 只登记保留会话的图片，跳过的会话其图片条目会被忽略 */
+  const commitSession = async (local: LocalSession) => {
+    for (const [imagePath, id] of local.images) {
+      images.set(imagePath, id)
+    }
+    await db.addStagingSession(local.session)
+    kept += 1
+  }
+
+  const flushPending = async () => {
+    const ordered = pending.map((item) => ({
+      id: item.session.id,
+      updatedAt: item.session.updatedAt,
+    }))
+    const keep = new Set(
+      selectInRange(ordered, (item) => item.updatedAt, options.range, Date.now()).map(
+        (item) => item.id
+      )
+    )
+    for (const local of pending) {
+      if (keep.has(local.session.id)) {
+        await commitSession(local)
+      }
+    }
+    pending.length = 0
+  }
+
   try {
-    for await (const entry of readArchive(file)) {
+    for await (const entry of readArchive(file, (done, total) =>
+      options.onProgress?.({ done, total })
+    )) {
       const { path } = entry
       const sessionId = parseSessionPath(path)
       if (!manifest) {
@@ -121,12 +156,16 @@ export const importArchive = async (file: File): Promise<void> => {
         }
         imported.add(sessionId)
         currentSessionId = sessionId
-        for (const [imagePath, id] of local.images) {
-          images.set(imagePath, id)
+        if (streaming) {
+          await commitSession(local)
+        } else {
+          pending.push(local)
         }
-        await db.addStagingSession(local.session)
       } else if (path === INDEX_PATH && !index) {
         index = readSessionIndex(await readJson(entry))
+        if (!streaming) {
+          await flushPending()
+        }
       } else if (
         index
           ? imported.has(/^chat_sessions\/([^/]+)_files\//.exec(path)?.[1] ?? '')
@@ -145,6 +184,10 @@ export const importArchive = async (file: File): Promise<void> => {
   if (!manifest) {
     fail('backupUnrecognized')
   }
+  // index 位于末尾或缺失时补一次筛选
+  if (!streaming && pending.length > 0) {
+    await flushPending()
+  }
   // index 只列出成功写出的会话，与会话文件一一对应。
   const listed = new Set(index?.map((entry) => entry.id))
   if (
@@ -154,6 +197,9 @@ export const importArchive = async (file: File): Promise<void> => {
     [...imported].some((id) => !listed.has(id))
   ) {
     fail('backupIncomplete')
+  }
+  if (!streaming && kept === 0) {
+    fail('backupEmptyRange')
   }
   await db.updateStagingFileTypes(stored)
 }

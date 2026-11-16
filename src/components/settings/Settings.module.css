@@ -305,6 +305,66 @@
   cursor: default;
 }
 
+/* 备份范围：三选一 + 数字输入 */
+.range {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.rangeRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rangeRow input[type='radio'] {
+  margin: 0;
+  accent-color: var(--dsw-alias-brand-primary);
+}
+
+.rangeInput {
+  width: 64px;
+  padding: 4px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+}
+
+/* 进度条：细轨道 + 进度文字 */
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.progressTrack {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.progressBar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--dsw-alias-brand-primary);
+  transition: width 160ms linear;
+}
+
+.progressText {
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .divider {
   flex-shrink: 0;
   width: 1px;
