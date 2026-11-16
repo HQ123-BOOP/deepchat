@@ -27,19 +27,17 @@ pnpm build
 
 The output is written to `dist/`. Deploy it to a static web server or open `dist/index.html` directly. Opening the file directly requires browser support for storage on `file://` pages and an API service that permits their cross-origin requests.
 
-## Android (Capacitor)
+## Android (Tauri)
 
-The project ships with a Capacitor Android wrapper under `android/`, so it can be packaged as an APK:
+The Android shell lives in `src-tauri/`; the Rust layer hosts the WebView, loads the CrispASR native library for on-device speech recognition, and stores secrets in the OS keychain (desktop).
 
 ```sh
-pnpm build            # build the web assets into dist/
-pnpm exec cap sync android
-cd android && ./gradlew assembleDebug   # on Windows: gradlew.bat assembleDebug
+pnpm apk              # tauri android build --apk --debug, runs the web build first
 ```
 
-The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. It is debug-signed and can be installed on a device directly.
+The APK is written under `src-tauri/gen/android/app/build/outputs/apk/`, in a per-target subdirectory. It is debug-signed and can be installed on a device directly.
 
-Building requires JDK 21 and an Android SDK with platform 36 and build-tools 36; point `sdk.dir` in `android/local.properties` at that SDK. The app is served from `https://localhost` to keep a secure context, and the API must allow cross-origin requests from it.
+Building requires JDK 17+, an Android SDK with NDK, and the Rust Android targets (`rustup target add aarch64-linux-android`). The web assets are loaded from the packaged `dist/`, so the app runs in a secure context.
 
 ## Features
 

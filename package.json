@@ -11,12 +11,10 @@
     "type": "tsc -p tsconfig.json",
     "lint": "oxlint src rspack.config.ts",
     "format": "oxfmt --write .",
-    "sync:android": "pnpm build && cap sync android",
-    "apk": "pnpm sync:android && cd android && gradlew assembleDebug"
+    "tauri": "tauri",
+    "apk": "tauri android build --apk --debug"
   },
   "dependencies": {
-    "@capacitor/android": "^8.6.2",
-    "@capacitor/core": "^8.6.2",
     "@earendil-works/pi-ai": "^1.5.2",
     "@types/katex": "^0.16.5",
     "@types/mdast": "~4.0.3",
@@ -41,7 +39,6 @@
     "zustand": "4.4.7"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.6.2",
     "@rspack/cli": "2.0.2",
     "@rspack/core": "2.0.2",
     "@rspack/dev-server": "2.0.1",

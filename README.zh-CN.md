@@ -27,19 +27,17 @@ pnpm build
 
 产物位于 `dist/`，可部署到静态服务器，也可直接打开 `dist/index.html`。直接打开时，浏览器和 API 服务需允许 `file://` 页面的存储与跨域请求。
 
-## Android（Capacitor）
+## Android（Tauri）
 
-项目已接入 Capacitor，Android 工程位于 `android/`，可直接打包 APK：
+Android 壳位于 `src-tauri/`；Rust 层承载 WebView、加载 CrispASR 原生库做本地语音识别，并在桌面端用系统钥匙串保存密钥。
 
 ```sh
-pnpm build            # 生成 dist/
-pnpm exec cap sync android
-cd android && ./gradlew assembleDebug   # Windows 用 gradlew.bat assembleDebug
+pnpm apk              # tauri android build --apk --debug，会先执行前端构建
 ```
 
-产物是 `android/app/build/outputs/apk/debug/app-debug.apk`，使用 debug 签名，可直接安装到设备。
+产物在 `src-tauri/gen/android/app/build/outputs/apk/` 下，按 target 分子目录；使用 debug 签名，可直接安装到设备。
 
-构建环境需要 JDK 21 与 Android SDK（platform 36 + build-tools 36）；`android/local.properties` 里的 `sdk.dir` 指向本机 SDK。App 以 `https://localhost` 加载页面，保持安全上下文，API 请求的跨域由服务端放行。
+构建环境需要 JDK 17+、带 NDK 的 Android SDK，以及 Rust 的 Android target（`rustup target add aarch64-linux-android`）。页面从打包后的 `dist/` 加载，运行在安全上下文中。
 
 ## 功能
 
