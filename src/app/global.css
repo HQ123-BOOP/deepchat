@@ -1,3 +1,12 @@
+/* 品牌字：仅用于侧边栏的 DeepChat 字标 */
+@font-face {
+  font-family: 'D-DIN Exp';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../assets/fonts/D-DINExp-Bold.woff2') format('woff2');
+}
+
 :root {
   --message-list-max-width: 840px;
   --message-list-padding-horizontal: 44px;
