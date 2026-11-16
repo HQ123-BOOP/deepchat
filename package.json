@@ -12,7 +12,8 @@
     "lint": "oxlint src rspack.config.ts",
     "format": "oxfmt --write .",
     "tauri": "tauri",
-    "apk": "tauri android build --apk --debug"
+    "apk": "tauri android build --apk --debug",
+    "desktop": "tauri build --debug --no-bundle"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^1.5.2",

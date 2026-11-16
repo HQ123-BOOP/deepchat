@@ -1,0 +1,5 @@
+# Windows GNU 工具链会为 cdylib 导出全部符号（本项目超过 10 万个），
+# 超过 PE 的 65535 个 ordinal 上限，链接时报 "export ordinal too large"。
+# 桌面二进制静态链接 lib，不需要 DLL 导出；Android 用独立 target，不受影响。
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-arg=-Wl,--exclude-all-symbols"]
