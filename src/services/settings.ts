@@ -215,6 +215,23 @@ export const setProviderConfig = (patch: Partial<ProviderConfig>) => {
   useSettings.setState({ provider })
 }
 
+/**
+ * 是否直连 DeepSeek 官方端点。官方端点才有 prefix 续写能力，
+ * 自建或第三方网关无法保证语义，界面上静默隐藏续写入口。
+ */
+export const isOfficialDeepSeekEndpoint = (provider: ProviderConfig): boolean => {
+  const raw = provider.piBaseUrl.trim()
+  if (raw) {
+    try {
+      return new URL(raw).hostname.toLowerCase() === 'api.deepseek.com'
+    } catch {
+      return false
+    }
+  }
+  // 留空时按内置目录的默认端点判断，只有 deepseek 提供商落在官方域名
+  return provider.piProvider === 'deepseek'
+}
+
 export const setApiKey = (apiKey: string | null) => {
   write(KEYS.apiKey, apiKey)
   useSettings.setState({ apiKey })
