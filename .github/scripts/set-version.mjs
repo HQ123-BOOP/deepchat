@@ -12,11 +12,12 @@ if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
 
 const rewrite = (path, pattern) => {
   const before = readFileSync(path, 'utf8')
-  const after = before.replace(pattern, (_, head, _current, tail) => `${head}${version}${tail}`)
-  if (after === before) {
+  // 先单独判断字段是否存在：版本已经一致时替换结果不变，也属于成功
+  if (!pattern.test(before)) {
     console.error(`no version field found in ${path}`)
     process.exit(1)
   }
+  const after = before.replace(pattern, (_, head, _current, tail) => `${head}${version}${tail}`)
   writeFileSync(path, after)
 }
 
