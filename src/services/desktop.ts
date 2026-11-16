@@ -10,6 +10,9 @@ type TauriInternals = {
 const getInternals = () =>
   (window as unknown as { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__
 
+/** 是否运行在 Tauri 壳里 */
+export const isTauriShell = () => typeof window !== 'undefined' && Boolean(getInternals())
+
 /** 同步原生标题栏深浅色；网页版或平台不支持时忽略 */
 export const setWindowTheme = async (theme: 'light' | 'dark'): Promise<void> => {
   const internals = getInternals()

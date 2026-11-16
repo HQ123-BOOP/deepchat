@@ -6,6 +6,7 @@ import { OCR_TOOL_SCHEMA, WEB_TOOL_SCHEMAS } from '../tools/registry.js'
 import { runProviderReply } from './providerReply.js'
 import { buildProviderMessages, type AttachmentRef } from './providerContext.js'
 import { maybeGenerateTitle } from './autoTitle.js'
+import { createSystemPrompt } from './systemPrompt.js'
 import { useUploads } from '../attachments.js'
 import { useSettings } from '../settings.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
@@ -28,8 +29,6 @@ import {
   type UserMessage,
 } from './types.js'
 
-/** 所有生成请求统一携带的助手身份说明 */
-const SYSTEM_PROMPT = 'You are a helpful assistant.'
 /** 保留最近打开的详情；当前会话、生成中及尚未成功保存的会话不淘汰。 */
 const SESSION_CACHE_LIMIT = 5
 /** 单张内联图片上限 32 MiB，超过则只登记清单，交由 ocr_file 按需读取 */
@@ -813,10 +812,17 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       ...(initial.search ? WEB_TOOL_SCHEMAS : []),
       ...(refs.length ? [OCR_TOOL_SCHEMA] : []),
     ]
+    // 身份、当前时间、位置、平台与语言；每次请求按本地时区重新生成
+    const systemPrompt = createSystemPrompt({
+      provider: settings.provider.piProvider,
+      model: settings.provider.model,
+      locale: settings.locale,
+      location: settings.location,
+    })
     const messages = await buildProviderMessages({
       provider,
       model: settings.provider.model,
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt,
       history: request.history,
       question: request.question,
       budget: { window: 131072, maxOutput: 8192 },
