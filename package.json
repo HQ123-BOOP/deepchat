@@ -31,7 +31,7 @@
     "mdast-util-from-markdown": "2.0.3",
     "mdast-util-gfm": "3.1.0",
     "mdast-util-math": "3.0.0",
-    "mermaid": "11.10.1",
+    "mermaid": "11.16.1",
     "micromark-extension-gfm": "3.0.0",
     "micromark-extension-llm-math": "3.1.0",
     "prismjs": "1.30.0",
@@ -47,7 +47,7 @@
     "@tauri-apps/cli": "^2.12.4",
     "@types/node": "~20.9.2",
     "cross-env": "^10.1.0",
-    "oxfmt": "0.48.0",
+    "oxfmt": "0.78.0",
     "oxlint": "1.63.0",
     "typescript": "7.0.2"
   }
