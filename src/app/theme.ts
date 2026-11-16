@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { setWindowTheme } from '../services/desktop.js'
 import { useSettings, type ThemePreference } from '../services/settings.js'
 
 export type Theme = 'light' | 'dark'
@@ -41,6 +42,8 @@ const applyTheme = (theme: Theme) => {
     body.removeAttribute('data-ds-dark-theme')
   }
   document.documentElement.style.colorScheme = theme
+  // 原生标题栏由窗口系统绘制，需要单独同步一次
+  void setWindowTheme(theme)
   // 首次背景色同步在样式表加载完成后执行，适配 WebKit 的 defer 脚本执行顺序。
   if (document.readyState === 'complete') {
     syncPageBackground()
