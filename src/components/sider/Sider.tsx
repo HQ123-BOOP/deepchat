@@ -5,6 +5,7 @@ import { useTranslate } from '../../i18n/index.js'
 import { IconPanelLeftOutline16, IconSettingsOutline16, NewChatIcon } from '../base/icons.js'
 import { setSiderCollapsed } from '../../services/settings.js'
 import { appVersion } from '../../services/updates.js'
+import { openExternal } from '../../services/nativeMedia.js'
 import { groupSessions } from '../../services/chat/sessionGroups.js'
 import { newChat, removeSession, useChatStore } from '../../services/chat/store.js'
 import type { SessionSummary } from '../../services/chat/types.js'
@@ -17,6 +18,9 @@ import { closeMobileSider, openMobileSider, useMobileSider } from './mobileSider
 import { SessionItem } from './SessionItem.js'
 import styles from './Sider.module.css'
 
+/** 连点品牌标志打开的彩蛋页面 */
+const PROJECT_URL = 'https://github.com/HQ123-BOOP/deepchat'
+
 /** 展开的侧边栏：名称与收起按钮、开启新对话、按时间分组的会话列表、底部设置；移动端放在抽屉里，收起按钮关闭抽屉 */
 export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const t = useTranslate()
@@ -28,6 +32,8 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const [deletePending, setDeletePending] = useState(false)
   // 对话分组默认展开；收起/展开用高度过渡，内容整体推动
   const [chatGroupOpen, setChatGroupOpen] = useState(true)
+  // 2 秒内连点 5 次品牌标志打开项目主页
+  const brandClicks = useRef<number[]>([])
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>
@@ -56,7 +62,21 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   return (
     <div className={clsx(styles.sider, mobile && styles.mobile)}>
       <div className={styles.top}>
-        <div className={styles.brand}>
+        <div
+          className={styles.brand}
+          onClick={() => {
+            const now = Date.now()
+            const recent = brandClicks.current.filter((time) => now - time < 2000)
+            recent.push(now)
+            brandClicks.current = recent
+            if (recent.length >= 5) {
+              brandClicks.current = []
+              if (!openExternal(PROJECT_URL)) {
+                window.open(PROJECT_URL, '_blank', 'noreferrer')
+              }
+            }
+          }}
+        >
           <img className={styles.brandMark} src={logoUrl} alt="" />
           <span className={styles.brandName}>DeepChat</span>
           <span className={styles.brandVersion}>v{appVersion()}</span>
