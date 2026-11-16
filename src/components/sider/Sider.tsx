@@ -4,6 +4,7 @@ import logoUrl from '../../assets/deepchat.svg'
 import { useTranslate } from '../../i18n/index.js'
 import { IconPanelLeftOutline16, IconSettingsOutline16, NewChatIcon } from '../base/icons.js'
 import { setSiderCollapsed } from '../../services/settings.js'
+import { appVersion } from '../../services/updates.js'
 import { groupSessions } from '../../services/chat/sessionGroups.js'
 import { newChat, removeSession, useChatStore } from '../../services/chat/store.js'
 import type { SessionSummary } from '../../services/chat/types.js'
@@ -58,6 +59,7 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
         <div className={styles.brand}>
           <img className={styles.brandMark} src={logoUrl} alt="" />
           <span className={styles.brandName}>DeepChat</span>
+          <span className={styles.brandVersion}>v{appVersion()}</span>
         </div>
         <IconButton
           size="m"
