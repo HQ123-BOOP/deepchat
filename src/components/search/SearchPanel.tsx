@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslate } from '../../i18n/index.js'
 import type { Source } from '../../services/chat/view.js'
 import { IconCloseOutline16 } from '../base/icons.js'
@@ -8,48 +8,27 @@ import { closeSearchPanel, useSearchPanel } from './searchPanelState.js'
 import { SourceCard } from './SourceCard.js'
 import styles from './SearchPanel.module.css'
 
-/** 收起动画时长，需与 CSS 的 transition 保持一致 */
-const CLOSE_MS = 260
-
 /**
  * 右侧「搜索结果」面板。
- * 打开时宽度从 0 过渡到目标值，把左侧对话区推过去；收起时反向推回再卸载。
+ * 常驻挂载，只切换宽度：打开时把左侧对话区推开，收起时推回。
+ * 保持 DOM 是为了让宽度过渡始终有起点，避免首次挂载直接落在终态。
  */
 export const SearchPanel = () => {
   const t = useTranslate()
   const entry = useSearchPanel((state) => state.entry)
   const sources = useSearchPanel((state) => state.sources)
-  // 收起过程中仍要显示最后一次的内容
-  const [snapshot, setSnapshot] = useState<{ sources: Source[] } | null>(null)
-  const [mounted, setMounted] = useState(Boolean(entry))
-  const [open, setOpen] = useState(false)
-  const closeTimer = useRef<number | undefined>(undefined)
-
+  // 收起后保留最后一次的内容，再次展开时不会先闪空
+  const [remembered, setRemembered] = useState<Source[]>([])
   useEffect(() => {
     if (entry) {
-      setSnapshot({ sources })
+      setRemembered(sources)
     }
   }, [entry, sources])
-
-  useEffect(() => {
-    if (entry) {
-      window.clearTimeout(closeTimer.current)
-      setMounted(true)
-      // 先以收起态挂载一帧，再切到展开态，宽度才有过渡起点
-      const frame = requestAnimationFrame(() => setOpen(true))
-      return () => cancelAnimationFrame(frame)
-    }
-    setOpen(false)
-    closeTimer.current = window.setTimeout(() => setMounted(false), CLOSE_MS)
-    return () => window.clearTimeout(closeTimer.current)
-  }, [entry])
-
-  if (!mounted || !snapshot) {
-    return null
-  }
-
+  // 展开时直接用当前来源，避免等 effect 回填导致首帧空白
+  const items = entry ? sources : remembered
+  const open = Boolean(entry)
   return (
-    <aside className={clsx(styles.panel, open && styles.panelOpen)}>
+    <aside className={clsx(styles.panel, open && styles.panelOpen)} aria-hidden={!open}>
       <div className={styles.panelInner}>
         <div className={styles.header}>
           <div role="heading" className={styles.title}>
@@ -62,7 +41,7 @@ export const SearchPanel = () => {
           />
         </div>
         <div className={styles.content}>
-          {snapshot.sources.map((source) => (
+          {items.map((source) => (
             <SourceCard key={source.url} source={source} className={styles.item} />
           ))}
         </div>

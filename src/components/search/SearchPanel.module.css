@@ -1,15 +1,17 @@
-/* 收起时宽度为 0，展开时推到目标宽度，flex 兄弟（对话区）随之被推开 */
+/* 常驻挂载，收起时宽度为 0；展开时宽度过渡，flex 兄弟（对话区）随之被推开 */
 .panel {
   flex-shrink: 0;
   box-sizing: border-box;
   width: 0;
   height: 100%;
   overflow: hidden;
+  pointer-events: none;
   transition: width 260ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .panelOpen {
   width: min(390px, calc(50vw - 4rem));
+  pointer-events: auto;
 }
 
 /* 内容保持展开时的固定宽度，动画期间不重新排版 */
