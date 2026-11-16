@@ -3,6 +3,7 @@ import { useTranslate } from '../../i18n/index.js'
 import { listRecentPhotos, photoFile, type RecentPhoto } from '../../services/nativeMedia.js'
 import {
   IconCameraOutline20,
+  IconCheckOutline16,
   IconFileOutline20,
   IconGalleryOutline20,
 } from '../base/icons.js'
@@ -71,7 +72,6 @@ export const AttachmentSheet = ({
       aria-hidden={!open}
     >
       <div className={styles.sheetInner}>
-        <div className={styles.recentHeader}>{t('attachmentRecentPhotos')}</div>
         <div className={styles.recentGrid}>
           {loading
             ? Array.from({ length: 8 }, (_, index) => (
@@ -91,6 +91,9 @@ export const AttachmentSheet = ({
               onClick={() => void choose(photo)}
             >
               <img src={photo.thumb} alt="" loading="lazy" />
+              <span className={styles.photoCheck}>
+                {busy === photo.id ? <IconCheckOutline16 /> : null}
+              </span>
               {busy === photo.id ? <span className={styles.photoBusy} /> : null}
             </button>
           ))}

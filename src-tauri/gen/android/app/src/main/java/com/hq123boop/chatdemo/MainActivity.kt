@@ -156,17 +156,23 @@ class MainActivity : TauriActivity() {
   inner class MediaBridge {
     @JavascriptInterface
     fun listRecentPhotos(limit: Int) {
-      if (!isAppPage()) {
-        postRecentPhotos("[]")
-        return
-      }
       val max = limit.coerceIn(1, 50)
       if (hasMediaAccess()) {
         queryRecentPhotos(max)
         return
       }
       runOnUiThread {
-        requestPermissions(arrayOf(mediaPermission())) {
+        // Android 14+ 支持「选择部分照片」，两个权限一起申请，用户选完即可读取
+        val permissions =
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            arrayOf(
+              Manifest.permission.READ_MEDIA_IMAGES,
+              Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+            )
+          } else {
+            arrayOf(mediaPermission())
+          }
+        requestPermissions(permissions) { _ ->
           if (hasMediaAccess()) {
             queryRecentPhotos(max)
           } else {
@@ -178,13 +184,6 @@ class MainActivity : TauriActivity() {
 
     @JavascriptInterface
     fun readPhoto(id: String) {
-      if (!isAppPage()) {
-        postJs(
-          "window.__androidPhotoData && window.__androidPhotoData(" +
-            "${JSONObject.quote(id)}, \"\")"
-        )
-        return
-      }
       thread {
         var dataUrl = ""
         try {

@@ -178,25 +178,6 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
 
   return (
     <>
-      {isMobile ? (
-        <AttachmentSheet
-          open={sheetOpen}
-          onClose={() => setSheetOpen(false)}
-          onCamera={() => {
-            setSheetOpen(false)
-            cameraInputRef.current?.click()
-          }}
-          onGallery={() => {
-            setSheetOpen(false)
-            galleryInputRef.current?.click()
-          }}
-          onFiles={() => {
-            setSheetOpen(false)
-            fileInputRef.current?.click()
-          }}
-          onPickPhoto={(file) => acceptFiles([file])}
-        />
-      ) : null}
       <div
         ref={wrapperRef}
         className={clsx(styles.wrapper, sessionId === null ? styles.home : styles.session)}
@@ -364,6 +345,25 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
       </div>
       {dragging ? <DragMask /> : null}
       </div>
+      {isMobile ? (
+        <AttachmentSheet
+          open={sheetOpen}
+          onClose={() => setSheetOpen(false)}
+          onCamera={() => {
+            setSheetOpen(false)
+            cameraInputRef.current?.click()
+          }}
+          onGallery={() => {
+            setSheetOpen(false)
+            galleryInputRef.current?.click()
+          }}
+          onFiles={() => {
+            setSheetOpen(false)
+            fileInputRef.current?.click()
+          }}
+          onPickPhoto={(file) => acceptFiles([file])}
+        />
+      ) : null}
     </>
   )
 }

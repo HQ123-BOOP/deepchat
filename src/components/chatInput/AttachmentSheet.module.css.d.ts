@@ -5,6 +5,7 @@ declare const styles: {
   readonly "recentHeader": string;
   readonly "recentGrid": string;
   readonly "photo": string;
+  readonly "photoCheck": string;
   readonly "photoBusy": string;
   readonly "skeleton": string;
   readonly "empty": string;

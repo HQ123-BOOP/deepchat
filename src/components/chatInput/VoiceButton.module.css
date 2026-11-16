@@ -24,7 +24,7 @@
   width: 34px;
   height: 34px;
   padding: 0;
-  border: none;
+  border: 1.5px solid var(--dsw-alias-label-secondary);
   border-radius: 50%;
   background-color: transparent;
   color: var(--dsw-alias-label-primary);
