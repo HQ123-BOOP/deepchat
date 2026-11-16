@@ -23,10 +23,47 @@ export const useTheme = (): Theme => {
   return resolveTheme(preference, osTheme)
 }
 
+type AndroidThemeBridge = {
+  setTheme: (dark: boolean, color: string) => void
+}
+
+/** 把 rgb()/rgba() 转成 Android 能解析的 #rrggbb */
+const toHexColor = (value: string): string | null => {
+  const match = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/.exec(value)
+  // 透明背景不能当成黑色，交给调用方回退到主题默认底色
+  if (!match || (match[4] !== undefined && Number(match[4]) === 0)) {
+    return null
+  }
+  return `#${match
+    .slice(1, 4)
+    .map((part) => Number(part).toString(16).padStart(2, '0'))
+    .join('')}`
+}
+
+/**
+ * Android 的状态栏、导航栏由原生窗口绘制，不跟随 WebView。
+ * 壳里注入了 AndroidTheme 桥，用来同步底色与图标明暗；网页版没有该对象。
+ */
+const syncNativeTheme = (theme: Theme) => {
+  const bridge = (window as unknown as { AndroidTheme?: AndroidThemeBridge }).AndroidTheme
+  if (!bridge) {
+    return
+  }
+  const color =
+    toHexColor(getComputedStyle(document.body).backgroundColor) ??
+    (theme === 'dark' ? '#151517' : '#ffffff')
+  try {
+    bridge.setTheme(theme === 'dark', color)
+  } catch {
+    // 旧版壳没有该桥时忽略
+  }
+}
+
 const syncPageBackground = () => {
   const backgroundColor = getComputedStyle(document.body).backgroundColor
   document.documentElement.style.backgroundColor = backgroundColor
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', backgroundColor)
+  syncNativeTheme(document.body.classList.contains('dark') ? 'dark' : 'light')
 }
 
 /** 同步页面主题、根画布背景和支持 theme-color 的浏览器栏。 */
@@ -44,6 +81,8 @@ const applyTheme = (theme: Theme) => {
   document.documentElement.style.colorScheme = theme
   // 原生标题栏由窗口系统绘制，需要单独同步一次
   void setWindowTheme(theme)
+  // Android 的状态栏与导航栏也要跟着换底色和图标明暗
+  syncNativeTheme(theme)
   // 首次背景色同步在样式表加载完成后执行，适配 WebKit 的 defer 脚本执行顺序。
   if (document.readyState === 'complete') {
     syncPageBackground()
