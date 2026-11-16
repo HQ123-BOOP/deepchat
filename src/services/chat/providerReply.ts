@@ -6,6 +6,7 @@
  * 块，因此本地工具调用也构造成同样的块，视图层不需要分支。
  */
 import { runAgent } from './agentLoop.js'
+import { settleReply } from './reply.js'
 import type {
   ChatProvider,
   ProviderMessage,
@@ -55,8 +56,25 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
   const pushBlock = (block: ReplyBlock) => {
     reply = { ...reply, blocks: [...reply.blocks, block] }
   }
+  /** 思考阶段结束时打点，避免用时一直增长；重复调用无副作用 */
+  const closeThinking = (at: number) => {
+    const last = reply.blocks.at(-1)
+    if (
+      last?.type !== 'thinking' ||
+      last.startedAt === undefined ||
+      last.endedAt !== undefined
+    ) {
+      return
+    }
+    reply = { ...reply, blocks: [...reply.blocks.slice(0, -1), { ...last, endedAt: at }] }
+    options.onChange(reply)
+  }
   /** 追加到末尾的同类块（正文或思考），没有则新建 */
   const appendToLast = (kind: 'text' | 'thinking', chunk: string) => {
+    // 正文开始即思考结束
+    if (kind === 'text') {
+      closeThinking(Date.now())
+    }
     const last = reply.blocks.at(-1)
     if (last?.type === kind) {
       const next =
@@ -79,7 +97,12 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
       if (block.type !== 'thinking') {
         continue
       }
-      const next = { ...block, signature }
+      // thinking_end 同时意味着该思考阶段结束，直接打上结束时间
+      const next = {
+        ...block,
+        signature,
+        ...(block.endedAt === undefined ? { endedAt: Date.now() } : {}),
+      }
       reply = {
         ...reply,
         blocks: [...reply.blocks.slice(0, index), next, ...reply.blocks.slice(index + 1)],
@@ -108,6 +131,8 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
       } else if (event.type === 'reasoning_signature') {
         attachReasoningSignature(event.signature)
       } else if (event.type === 'tool_start') {
+        // 工具调用说明思考阶段已结束
+        closeThinking(Date.now())
         // OCR 结果只回填给模型，不生成联网步骤卡片
         if (event.call.name === 'ocr_file') {
           continue
@@ -171,13 +196,13 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
         options.onChange(reply)
       }
     }
-    reply = { ...reply, status: 'done', stopReason: 'end_turn' }
+    // 收尾时补齐仍未结束的思考块，避免用时停在最后一次 tick
+    reply = settleReply({ ...reply, stopReason: 'end_turn' }, 'done', Date.now())
   } catch (error) {
-    reply = {
-      ...reply,
-      status: 'error',
-      error: { kind: 'stream', message: error instanceof Error ? error.message : String(error) },
-    }
+    reply = settleReply(reply, 'error', Date.now(), {
+      kind: 'stream',
+      message: error instanceof Error ? error.message : String(error),
+    })
   }
   options.onDone(reply)
   return reply

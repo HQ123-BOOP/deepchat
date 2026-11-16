@@ -346,8 +346,11 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
   }
 }
 
-/** 思考总用时（秒）：各思考块用时之和，至少 1 秒；有块缺少用时时返回 null。 */
-export const getTotalThinkingSeconds = (steps: Step[], now: number) => {
+/**
+ * 思考总用时（秒）：各思考块用时之和，至少 1 秒；有块缺少用时时返回 null。
+ * 非流式状态下若历史块没有结束时间（旧数据），按起点计，避免用时随渲染一直变大。
+ */
+export const getTotalThinkingSeconds = (steps: Step[], now: number, streaming = true) => {
   let total = 0
   for (const step of steps) {
     if (step.type === 'thinking') {
@@ -359,7 +362,7 @@ export const getTotalThinkingSeconds = (steps: Step[], now: number) => {
         if (block.startedAt === undefined) {
           return null
         }
-        total += (block.endedAt ?? now) - block.startedAt
+        total += (block.endedAt ?? (streaming ? now : block.startedAt)) - block.startedAt
       }
     }
   }
@@ -374,7 +377,7 @@ export const getAreaTitle = (
   hasResponse = view.answer !== null
 ) => {
   if (hasResponse) {
-    const count = getTotalThinkingSeconds(view.steps, now)
+    const count = getTotalThinkingSeconds(view.steps, now, streaming)
     if (count === null) {
       return translate('thinkingSwitch')
     }
