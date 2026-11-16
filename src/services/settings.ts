@@ -20,9 +20,9 @@ export const PI_APIS = [
   'mistral-conversations',
 ] as const
 
-/** 所有模型请求统一由 pi-ai 发出；联网工具另用 settings.apiKey 调用工具 API */
+/** 所有模型请求统一由 pi-ai 发出；工具 API 与模型共用 provider.apiKey */
 export type ProviderConfig = {
-  /** 模型提供商的 Key；留空时复用 settings.apiKey */
+  /** 模型与工具 API 共用的 Key；留空时回退旧版单独保存的 settings.apiKey */
   apiKey: string
   /** 该提供商使用的模型名 */
   model: string
@@ -32,6 +32,10 @@ export type ProviderConfig = {
   piApi: string
   /** pi-ai：独立端点，留空按 provider / 协议用官方默认值 */
   piBaseUrl: string
+  /** 上下文窗口；null 表示按内置模型目录自动匹配，匹配不到用 1M */
+  contextWindow: number | null
+  /** 最大输出；null 表示按内置模型目录自动匹配，匹配不到用 384k */
+  maxTokens: number | null
 }
 
 const DEFAULT_PROVIDER: ProviderConfig = {
@@ -40,7 +44,12 @@ const DEFAULT_PROVIDER: ProviderConfig = {
   piProvider: 'deepseek',
   piApi: 'openai-completions',
   piBaseUrl: '',
+  contextWindow: null,
+  maxTokens: null,
 }
+
+const positiveOrNull = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : null
 
 /** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、深度思考与智能搜索开关、侧边栏收起状态 */
 type Settings = {
@@ -140,10 +149,19 @@ const readProvider = (): ProviderConfig => {
       piProvider: parsed.piProvider?.trim() || DEFAULT_PROVIDER.piProvider,
       piApi: parsed.piApi?.trim() || DEFAULT_PROVIDER.piApi,
       piBaseUrl: parsed.piBaseUrl ?? '',
+      contextWindow: positiveOrNull(parsed.contextWindow),
+      maxTokens: positiveOrNull(parsed.maxTokens),
     }
   } catch {
     return DEFAULT_PROVIDER
   }
+}
+
+/** 旧版把 Key 单独存一份；升级后迁移到模型配置，避免用户再填一次 */
+const initialProvider = (): ProviderConfig => {
+  const provider = readProvider()
+  const legacy = read(KEYS.apiKey)
+  return legacy && !provider.apiKey ? { ...provider, apiKey: legacy } : provider
 }
 
 /** 旧版本只有 thinking 开关：true 视为 high，false 视为 off */
@@ -160,7 +178,7 @@ const initialTtsVoice = (): TtsVoice => (read(KEYS.ttsVoice) === 'tide' ? 'tide'
 
 export const useSettings = create<Settings>(() => ({
   apiKey: read(KEYS.apiKey),
-  provider: readProvider(),
+  provider: initialProvider(),
   locale: initialLocale(),
   location: initialLocation(),
   themePreference: initialThemePreference(),

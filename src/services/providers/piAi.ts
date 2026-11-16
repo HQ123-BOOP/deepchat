@@ -10,6 +10,11 @@
  * deepseek 兼容分支生成；safety_check 这类扩展字段通过 onPayload 注入。
  */
 import { normalizeContext } from '@earendil-works/pi-ai'
+import {
+  getBuiltinModels,
+  getBuiltinProviders,
+  type BuiltinProvider,
+} from '@earendil-works/pi-ai/providers/all'
 import type {
   Api,
   AssistantMessage,
@@ -39,7 +44,15 @@ export type PiAiConfig = {
   /** 留空时按 provider / 协议使用官方默认地址 */
   baseUrl: string
   apiKey: string
+  /** 手动覆盖的上下文窗口；缺省时按内置模型目录匹配 */
+  contextWindow?: number | null
+  /** 手动覆盖的最大输出；缺省时按内置模型目录匹配 */
+  maxTokens?: number | null
 }
+
+/** 目录匹配不到时的兜底值 */
+const DEFAULT_CONTEXT_WINDOW = 1_048_576
+const DEFAULT_MAX_TOKENS = 393_216
 
 /** 各协议的官方默认端点；自建服务可在设置里覆盖 */
 const DEFAULT_BASE_URLS: Record<string, string> = {
@@ -54,11 +67,28 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
 const FALLBACK_BASE_URL = 'https://api.openai.com/v1'
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 
-/** DeepSeek 的 OpenAI 兼容端点不带 /v1；其余按协议取默认值 */
+/** 查 pi-ai 内置目录（数据来自 models.dev）；provider 不在目录里时返回 undefined */
+const lookupBuiltin = (config: PiAiConfig, modelId?: string) => {
+  try {
+    if (!(getBuiltinProviders() as readonly string[]).includes(config.provider)) {
+      return undefined
+    }
+    const models = getBuiltinModels(config.provider as BuiltinProvider)
+    return modelId ? models.find((model) => model.id === modelId) : models[0]
+  } catch {
+    return undefined
+  }
+}
+
+/** DeepSeek 的 OpenAI 兼容端点不带 /v1；其余按内置目录、协议默认值依次回退 */
 export const resolvePiBaseUrl = (config: PiAiConfig): string => {
   const explicit = config.baseUrl.trim()
   if (explicit) {
     return explicit.replace(/\/+$/, '')
+  }
+  const builtin = lookupBuiltin(config)
+  if (builtin?.baseUrl) {
+    return builtin.baseUrl.replace(/\/+$/, '')
   }
   if (config.provider === 'deepseek') {
     return DEEPSEEK_BASE_URL
@@ -79,28 +109,33 @@ const isDeepSeekConfig = (config: PiAiConfig): boolean =>
   config.provider === 'deepseek' || resolvePiBaseUrl(config).includes('deepseek.com')
 
 const buildModel = (config: PiAiConfig, modelId: string): Model<Api> => {
+  const builtin = lookupBuiltin(config, modelId)
   const model = {
     id: modelId,
-    name: modelId,
+    name: builtin?.name ?? modelId,
     api: config.api as Api,
     provider: config.provider,
     baseUrl: resolvePiBaseUrl(config),
     // 档位关闭时仍保持 reasoning=true，交给 reasoningEffort 缺省表达「关闭思考」
-    reasoning: true,
-    input: ['text', 'image'],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 131072,
-    maxTokens: 8192,
-    ...(isDeepSeekConfig(config) && config.api === 'openai-completions'
-      ? {
-          compat: {
-            thinkingFormat: 'deepseek',
-            maxTokensField: 'max_tokens',
-            supportsReasoningEffort: true,
-            requiresReasoningContentOnAssistantMessages: true,
-          },
-        }
-      : {}),
+    reasoning: builtin?.reasoning ?? true,
+    input: builtin?.input ?? ['text', 'image'],
+    cost: builtin?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    // 目录里没有该模型时按 1M / 384k 兜底，用户可在设置里覆盖
+    contextWindow: config.contextWindow ?? builtin?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+    maxTokens: config.maxTokens ?? builtin?.maxTokens ?? DEFAULT_MAX_TOKENS,
+    ...(builtin?.thinkingLevelMap ? { thinkingLevelMap: builtin.thinkingLevelMap } : {}),
+    ...(builtin?.compat
+      ? { compat: builtin.compat }
+      : isDeepSeekConfig(config) && config.api === 'openai-completions'
+        ? {
+            compat: {
+              thinkingFormat: 'deepseek',
+              maxTokensField: 'max_tokens',
+              supportsReasoningEffort: true,
+              requiresReasoningContentOnAssistantMessages: true,
+            },
+          }
+        : {}),
   }
   return model as unknown as Model<Api>
 }
@@ -220,7 +255,7 @@ const loadApi = async (api: string): Promise<{ stream: StreamFn }> => {
 
 /**
  * 按当前设置构造唯一的模型请求出口。
- * 模型 Key 留空时复用 settings.apiKey（DeepSeek 工具服务 Key），避免同一个 Key 填两遍。
+ * 模型与工具 API 共用同一个 Key；旧版单独保存的 settings.apiKey 仅作回退。
  */
 export const createConfiguredPiProvider = (): ChatProvider => {
   const { provider, apiKey } = useSettings.getState()
@@ -229,6 +264,8 @@ export const createConfiguredPiProvider = (): ChatProvider => {
     api: provider.piApi,
     baseUrl: provider.piBaseUrl,
     apiKey: provider.apiKey.trim() || apiKey?.trim() || '',
+    contextWindow: provider.contextWindow,
+    maxTokens: provider.maxTokens,
   })
 }
 

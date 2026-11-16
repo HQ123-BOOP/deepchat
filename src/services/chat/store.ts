@@ -830,7 +830,8 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       model: settings.provider.model,
       messages,
       tools: toolSchemas,
-      toolApiKey: settings.apiKey ?? '',
+      // 工具 API 与模型请求共用一个 Key；旧版本单独保存的 Key 作为回退
+      toolApiKey: settings.provider.apiKey.trim() || settings.apiKey || '',
       loadFile: db.loadFile,
       fileNames,
       reply,
