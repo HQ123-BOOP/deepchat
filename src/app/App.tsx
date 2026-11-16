@@ -19,6 +19,7 @@ import { ensureApiKey } from '../components/settings/settingsDialogState.js'
 import { SettingsDialog } from '../components/settings/SettingsDialog.js'
 import { Toast } from '../components/base/Toast.js'
 import { showToast } from '../components/base/toastState.js'
+import { checkOnLaunch } from '../services/updates.js'
 import { onUploadNotice } from '../services/attachments.js'
 import { Button } from '../components/base/Button.js'
 import { stopReadAloud } from '../services/speech/readAloud.js'
@@ -73,6 +74,19 @@ export const App = () => {
     void initChat()
     // 首次打开先在设置里输入 API Key
     ensureApiKey()
+    // 启动几秒后再查更新，避免和首屏请求争带宽；按设置间隔决定是否请求，间隔内不重复提示
+    const timer = window.setTimeout(() => {
+      void checkOnLaunch().then((update) => {
+        if (update) {
+          showToast({
+            key: 'updateAvailable',
+            params: { version: update.version },
+            link: { key: 'updateDownload', href: update.url },
+          })
+        }
+      })
+    }, 4000)
+    return () => window.clearTimeout(timer)
   }, [])
 
   return (

@@ -25,6 +25,7 @@ import {
   type RangeState,
 } from './BackupRange.js'
 import { useChatStore } from '../../services/chat/store.js'
+import { appVersion, checkForUpdate } from '../../services/updates.js'
 import { regionCodes, getRegionName, provinces } from '../../services/location.js'
 import {
   INPUT_MODALITIES,
@@ -35,9 +36,11 @@ import {
   setLocation,
   setThemePreference,
   setTtsVoice,
+  setUpdateInterval,
   useSettings,
   type InputModality,
   type ThemePreference,
+  type UpdateInterval,
 } from '../../services/settings.js'
 import { builtinProviders, getBuiltinModels, type BuiltinProvider } from '@earendil-works/pi-ai/providers/all'
 import { useTranslate, type TranslationKey, type TranslationMessage } from '../../i18n/index.js'
@@ -118,6 +121,7 @@ const SettingsContent = () => {
               <TtsVoiceSetting />
               <AsrModelSetting />
               <LocationSetting />
+              <UpdateSetting />
             </>
           ) : section === 'model' ? (
             <ProviderSetting />
@@ -845,6 +849,89 @@ const SettingCell = ({
       </div>
       {action}
     </div>
+  )
+}
+
+/** 更新间隔的选项值用字符串，Select 统一按 string 处理 */
+const parseUpdateInterval = (value: string): UpdateInterval =>
+  value === 'never' ? 'never' : value === '7' ? 7 : value === '30' ? 30 : 1
+
+/** 检查更新：显示当前版本与立即检查入口，下方可设置自动检查间隔 */
+const UpdateSetting = () => {
+  const t = useTranslate()
+  const updateInterval = useSettings((state) => state.updateInterval)
+  const [busy, setBusy] = useState(false)
+  const [update, setUpdate] = useState<{ version: string; url: string } | null>(null)
+  const [status, setStatus] = useState<Status>(null)
+
+  const check = async () => {
+    setBusy(true)
+    setStatus(null)
+    const result = await checkForUpdate(true)
+    setBusy(false)
+    if (result.state === 'update') {
+      setUpdate({ version: result.version, url: result.url })
+      setStatus(null)
+      return
+    }
+    setUpdate(null)
+    setStatus({ key: result.state === 'latest' ? 'settingsUpdateLatest' : 'settingsUpdateFailed' })
+  }
+
+  return (
+    <>
+      <SettingCell
+        label={t('settingsUpdate')}
+        description={t('settingsUpdateDescription', { version: appVersion() })}
+        status={
+          busy
+            ? { key: 'settingsUpdateChecking' }
+            : update
+              ? { key: 'settingsUpdateAvailable', params: { version: update.version } }
+              : status
+        }
+        action={
+          update ? (
+            <Button
+              variant="primary"
+              size="m"
+              className={styles.cellButton}
+              onClick={() => window.open(update.url, '_blank', 'noreferrer')}
+            >
+              {t('settingsUpdateDownload')}
+            </Button>
+          ) : (
+            <Button
+              variant="outlined"
+              size="m"
+              className={styles.cellButton}
+              disabled={busy}
+              onClick={() => void check()}
+            >
+              {t('settingsUpdateCheckNow')}
+            </Button>
+          )
+        }
+      />
+      <SettingCell
+        label={t('settingsUpdateAutoCheck')}
+        description={t('settingsUpdateAutoCheckDescription')}
+        status={null}
+        action={
+          <Select
+            ariaLabel={t('settingsUpdateAutoCheck')}
+            value={String(updateInterval)}
+            options={[
+              { value: '1', label: t('settingsUpdateIntervalDaily') },
+              { value: '7', label: t('settingsUpdateIntervalWeekly') },
+              { value: '30', label: t('settingsUpdateIntervalMonthly') },
+              { value: 'never', label: t('settingsUpdateIntervalNever') },
+            ]}
+            onChange={(value) => setUpdateInterval(parseUpdateInterval(value))}
+          />
+        }
+      />
+    </>
   )
 }
 

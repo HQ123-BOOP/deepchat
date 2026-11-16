@@ -10,6 +10,9 @@ export type ThemePreference = 'light' | 'dark' | 'system'
 /** 推理强度：映射为标准 Chat API 的 reasoning_effort，off 表示关闭思考 */
 export type ReasoningEffort = 'off' | 'low' | 'high' | 'max'
 
+/** 自动检查更新的间隔（天）；never 表示只在手动点「立即检查」时请求 */
+export type UpdateInterval = 1 | 7 | 30 | 'never'
+
 /** pi-ai 支持的协议；provider 由设置里另行选择 */
 export const PI_APIS = [
   'openai-completions',
@@ -87,6 +90,7 @@ type Settings = {
   reasoningEffort: ReasoningEffort
   search: boolean
   siderCollapsed: boolean
+  updateInterval: UpdateInterval
 }
 
 const KEYS = {
@@ -100,6 +104,7 @@ const KEYS = {
   thinking: 'chat-demo:thinking',
   search: 'chat-demo:search',
   siderCollapsed: 'chat-demo:sider-collapsed',
+  updateInterval: 'chat-demo:update-interval',
 } as const
 
 const read = (key: string) => {
@@ -203,6 +208,16 @@ const initialReasoningEffort = (): ReasoningEffort => {
 /** 未保存过时使用服务端默认音色 stella（海星） */
 const initialTtsVoice = (): TtsVoice => (read(KEYS.ttsVoice) === 'tide' ? 'tide' : 'stella')
 
+/** 自动检查更新默认每天一次，与旧行为一致 */
+const initialUpdateInterval = (): UpdateInterval => {
+  const saved = read(KEYS.updateInterval)
+  if (saved === 'never') {
+    return 'never'
+  }
+  const days = Number(saved)
+  return days === 7 || days === 30 ? days : 1
+}
+
 export const useSettings = create<Settings>(() => ({
   apiKey: read(KEYS.apiKey),
   provider: initialProvider(),
@@ -213,6 +228,7 @@ export const useSettings = create<Settings>(() => ({
   reasoningEffort: initialReasoningEffort(),
   search: read(KEYS.search) === 'true',
   siderCollapsed: read(KEYS.siderCollapsed) === 'true',
+  updateInterval: initialUpdateInterval(),
 }))
 
 export const setLocale = (locale: Locale) => {
@@ -277,4 +293,9 @@ export const setSearch = (search: boolean) => {
 export const setSiderCollapsed = (siderCollapsed: boolean) => {
   write(KEYS.siderCollapsed, String(siderCollapsed))
   useSettings.setState({ siderCollapsed })
+}
+
+export const setUpdateInterval = (updateInterval: UpdateInterval) => {
+  write(KEYS.updateInterval, String(updateInterval))
+  useSettings.setState({ updateInterval })
 }
