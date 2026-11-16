@@ -2,7 +2,7 @@ import { Inflate } from 'fflate'
 
 const READ_CHUNK_BYTES = 256 * 1024
 // 控制每轮同步解压的工作量；输出交给调用方保存后才继续读取。
-const INFLATE_CHUNK_BYTES = 8 * 1024
+const INFLATE_CHUNK_BYTES = 64 * 1024
 
 /** ZIP 结构损坏或使用了不支持的特性 */
 export class ArchiveError extends Error {
@@ -23,6 +23,19 @@ export const isZipFile = async (file: File) => {
 }
 
 const viewOf = (bytes: Uint8Array) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+
+// 同一个 File 在格式校验和导入时会读两次目录，缓存起来避免重复扫描大包
+const directoryCache = new WeakMap<File, { entries: Entry[]; offset: number }>()
+
+const getDirectory = async (file: File) => {
+  const cached = directoryCache.get(file)
+  if (cached) {
+    return cached
+  }
+  const directory = await readDirectory(file)
+  directoryCache.set(file, directory)
+  return directory
+}
 
 const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
   let crc = value
@@ -243,7 +256,7 @@ export async function* readArchive(
   file: File,
   onProgress?: (done: number, total: number) => void
 ): AsyncGenerator<ArchiveEntry> {
-  const directory = await readDirectory(file)
+  const directory = await getDirectory(file)
   const total = directory.entries.filter((entry) => !entry.path.endsWith('/')).length
   let done = 0
   for (const [index, entry] of directory.entries.entries()) {
@@ -275,6 +288,11 @@ export async function* readArchive(
           file,
           start + offset,
           Math.min(READ_CHUNK_BYTES, entry.compressedSize - offset)
+        )
+        // 大图片的解压耗时较长，按已读字节推进度，避免进度条长时间停在原地
+        onProgress?.(
+          done + Math.min(1, (offset + chunk.length) / Math.max(1, entry.compressedSize)),
+          total
         )
         if (!inflate) {
           append(chunk)
@@ -308,11 +326,13 @@ export async function* readArchive(
 
 /** 读出整个条目：会话 JSON 需要完整解析，图片需要识别类型后整张保存。 */
 export const readEntry = async (entry: ArchiveEntry): Promise<Blob> => {
-  const parts: Blob[] = []
+  // 每个 8KB 小块各自建 Blob 会让大图产生上千个对象，最后合并非常慢；
+  // 这里保留字节块，交给 Blob 构造器一次性组装。
+  const parts: Uint8Array[] = []
   for await (const chunk of entry.stream) {
-    parts.push(new Blob([chunk as Uint8Array<ArrayBuffer>]))
+    parts.push(chunk)
   }
-  return new Blob(parts)
+  return new Blob(parts as BlobPart[])
 }
 
 /** 不需要的条目也要读完，以校验大小与 CRC。 */
