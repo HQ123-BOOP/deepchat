@@ -1,4 +1,6 @@
 import clsx from 'clsx'
+import { isMobileViewport } from '../../app/viewport.js'
+import { openExternal } from '../../services/nativeMedia.js'
 import type { Source } from '../../services/chat/view.js'
 import { formatDate } from '../../utils/format.js'
 import { SiteLogo } from './SiteLogo.js'
@@ -14,7 +16,18 @@ const formatPublishedAt = (value: string | null) => (value ? (formatDate(value, 
 export const SourceCard = ({ source, className }: { source: Source; className?: string }) => {
   const date = formatPublishedAt(source.publishedAt)
   return (
-    <a className={styles.anchor} href={source.url} target="_blank" rel="noreferrer">
+    <a
+      className={styles.anchor}
+      href={source.url}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(event) => {
+        // 移动端交给系统浏览器：WebView 内跳转后返回会重新加载页面，丢失当前会话
+        if (isMobileViewport() && openExternal(source.url)) {
+          event.preventDefault()
+        }
+      }}
+    >
       <div className={clsx(styles.card, className)}>
         <div className={styles.meta}>
           <SiteLogo url={source.siteIcon} className={styles.siteIcon} />

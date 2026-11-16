@@ -10,6 +10,9 @@ const subscribe = (onChange: () => void) => {
 
 export const useIsMobile = () => useSyncExternalStore(subscribe, () => query.matches)
 
+/** 非组件场景（例如点击外链前）直接读当前视口是否按移动端布局 */
+export const isMobileViewport = () => query.matches
+
 const preventPageScroll = (event: TouchEvent) => {
   if (event.touches.length !== 1) {
     return

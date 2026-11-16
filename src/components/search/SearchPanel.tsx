@@ -1,5 +1,6 @@
 import clsx from 'clsx'
 import { useEffect, useState } from 'react'
+import { useIsMobile } from '../../app/viewport.js'
 import { useTranslate } from '../../i18n/index.js'
 import type { Source } from '../../services/chat/view.js'
 import { IconCloseOutline16 } from '../base/icons.js'
@@ -27,6 +28,29 @@ export const SearchPanel = () => {
   // 展开时直接用当前来源，避免等 effect 回填导致首帧空白
   const items = entry ? sources : remembered
   const open = Boolean(entry)
+  const isMobile = useIsMobile()
+
+  // 移动端是全屏抽屉：压一条历史记录，Android 返回键先收起面板回到原对话
+  useEffect(() => {
+    if (!isMobile || !open) {
+      return
+    }
+    const token = `search-${Date.now()}`
+    history.pushState({ ...history.state, [token]: true }, '')
+    let popped = false
+    const onPop = () => {
+      popped = true
+      closeSearchPanel()
+    }
+    window.addEventListener('popstate', onPop)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      if (!popped) {
+        history.back()
+      }
+    }
+  }, [isMobile, open])
+
   return (
     <aside className={clsx(styles.panel, open && styles.panelOpen)} aria-hidden={!open}>
       <div className={styles.panelInner}>
