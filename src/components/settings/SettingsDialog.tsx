@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   IconDarkOutline16,
   IconDataOutline16,
@@ -19,6 +19,7 @@ import {
 import { useChatStore } from '../../services/chat/store.js'
 import { regionCodes, getRegionName, provinces } from '../../services/location.js'
 import {
+  INPUT_MODALITIES,
   isChineseBrowser,
   PI_APIS,
   setLocale,
@@ -27,12 +28,14 @@ import {
   setThemePreference,
   setTtsVoice,
   useSettings,
+  type InputModality,
   type ThemePreference,
 } from '../../services/settings.js'
-import { getBuiltinProviders } from '@earendil-works/pi-ai/providers/all'
+import { builtinProviders, getBuiltinModels, type BuiltinProvider } from '@earendil-works/pi-ai/providers/all'
 import { useTranslate, type TranslationKey, type TranslationMessage } from '../../i18n/index.js'
 import { Button } from '../base/Button.js'
 import { Modal } from '../base/Modal.js'
+import { SearchSelect } from '../base/SearchSelect.js'
 import { Select } from '../base/Select.js'
 import { showToast } from '../base/toastState.js'
 import {
@@ -298,35 +301,163 @@ const LocaleSetting = () => {
   )
 }
 
-/** 朗读音色：stella（海星，女声）/ tide（暗潮，男声） */
-/** 模型请求统一由 pi-ai 发出：协议、提供商、端点、Key 与模型名 */
+/** token 数压成菜单里的短标签：1M / 384k */
+const formatTokens = (value: number): string =>
+  value >= 1_000_000
+    ? `${Number((value / 1_000_000).toFixed(1))}M`
+    : value >= 1000
+      ? `${Math.round(value / 1000)}k`
+      : String(value)
+
+type CatalogModel = {
+  id: string
+  name: string
+  api: string
+  input: InputModality[]
+  contextWindow: number
+  maxTokens: number
+}
+
+/** 读取某个提供商的 models.dev 目录；不在内置目录里时返回空数组 */
+const catalogModels = (providerId: string): CatalogModel[] => {
+  try {
+    return getBuiltinModels(providerId as BuiltinProvider).map((model) => ({
+      id: model.id,
+      name: model.name,
+      api: model.api,
+      input: model.input as InputModality[],
+      contextWindow: model.contextWindow,
+      maxTokens: model.maxTokens,
+    }))
+  } catch {
+    return []
+  }
+}
+
+/** 目录模型使用的协议；不在支持列表里时保持当前协议 */
+const supportedApi = (model: CatalogModel | undefined): string | null =>
+  model && (PI_APIS as readonly string[]).includes(model.api) ? model.api : null
+
+const MODALITY_LABELS = {
+  text: 'modalityText',
+  image: 'modalityImage',
+  audio: 'modalityAudio',
+  video: 'modalityVideo',
+} as const satisfies Record<InputModality, TranslationKey>
+
+/**
+ * 模型配置：提供商与模型来自内置目录，都可搜索；模型也允许手填目录外的值。
+ * 选中目录模型后自动带出协议、上下文、最大输出与输入模态，手改过则保留手改值。
+ */
 const ProviderSetting = () => {
   const t = useTranslate()
   const provider = useSettings((state) => state.provider)
   const fieldStyle = { marginTop: 8 } as const
+
+  const providers = useMemo(
+    () =>
+      builtinProviders().map((item) => ({
+        value: item.id,
+        label: item.name || item.id,
+        description: item.name && item.name !== item.id ? item.id : undefined,
+      })),
+    []
+  )
+  const models = useMemo(() => catalogModels(provider.piProvider), [provider.piProvider])
+  const modelOptions = useMemo(
+    () =>
+      models.map((model) => ({
+        value: model.id,
+        label: model.name || model.id,
+        description: [
+          model.name && model.name !== model.id ? model.id : null,
+          `${formatTokens(model.contextWindow)} / ${formatTokens(model.maxTokens)}`,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      })),
+    [models]
+  )
+  const catalogModel = models.find((model) => model.id === provider.model)
+  const modalities: InputModality[] =
+    provider.inputModalities ??
+    (catalogModel?.input.includes('image') ? ['text', 'image'] : ['text'])
+
+  /** 换提供商：优先保留同名模型，否则取目录里的第一个 */
+  const selectProvider = (piProvider: string) => {
+    const next = catalogModels(piProvider)
+    const matched = next.find((model) => model.id === provider.model) ?? next[0]
+    const api = supportedApi(matched)
+    setProviderConfig({
+      piProvider,
+      ...(matched ? { model: matched.id } : {}),
+      ...(api ? { piApi: api } : {}),
+      contextWindow: null,
+      maxTokens: null,
+      inputModalities: null,
+    })
+  }
+
+  /** 选目录模型时同步协议，并把容量与模态交回自动匹配 */
+  const selectModel = (modelId: string) => {
+    const matched = models.find((model) => model.id === modelId)
+    const api = supportedApi(matched)
+    setProviderConfig({
+      model: modelId,
+      ...(api ? { piApi: api } : {}),
+      contextWindow: null,
+      maxTokens: null,
+      inputModalities: null,
+    })
+  }
+
+  const toggleModality = (modality: InputModality) => {
+    if (modality === 'text') {
+      return
+    }
+    const next = modalities.includes(modality)
+      ? modalities.filter((item) => item !== modality)
+      : [...modalities, modality]
+    setProviderConfig({
+      inputModalities: next.includes('text') ? next : ['text', ...next],
+    })
+  }
+
   return (
     <div className={styles.cell}>
-      <div className={styles.label}>{t('settingsProvider')}</div>
-      <div className={styles.label} style={fieldStyle}>
-        {t('settingsProviderPiApi')}
-      </div>
+      <div className={styles.label}>{t('settingsProviderPiProvider')}</div>
       <div style={{ marginTop: 8 }}>
-        <Select
-          ariaLabel={t('settingsProviderPiApi')}
-          value={provider.piApi}
-          options={PI_APIS.map((api) => ({ value: api, label: api }))}
-          onChange={(piApi) => setProviderConfig({ piApi })}
+        <SearchSelect
+          ariaLabel={t('settingsProviderPiProvider')}
+          value={provider.piProvider}
+          options={providers}
+          searchPlaceholder={t('settingsProviderSearchProvider')}
+          emptyLabel={t('settingsProviderNoMatch')}
+          onChange={selectProvider}
         />
       </div>
       <div className={styles.label} style={fieldStyle}>
-        {t('settingsProviderPiProvider')}
+        {t('settingsProviderModelLabel')}
       </div>
       <div style={{ marginTop: 8 }}>
-        <Select
-          ariaLabel={t('settingsProviderPiProvider')}
-          value={provider.piProvider}
-          options={getBuiltinProviders().map((name) => ({ value: name, label: name }))}
-          onChange={(piProvider) => setProviderConfig({ piProvider })}
+        <SearchSelect
+          ariaLabel={t('settingsProviderModelLabel')}
+          value={provider.model}
+          options={modelOptions}
+          searchPlaceholder={t('settingsProviderSearchModel')}
+          emptyLabel={t('settingsProviderNoMatch')}
+          freeformLabel={(query) => t('settingsProviderCustomModel', { query })}
+          onChange={selectModel}
+        />
+      </div>
+      <div className={styles.apiKeyInput} style={fieldStyle}>
+        <input
+          type="password"
+          placeholder={t('settingsProviderApiKey')}
+          autoComplete="new-password"
+          spellCheck={false}
+          value={provider.apiKey}
+          onChange={(event) => setProviderConfig({ apiKey: event.target.value })}
         />
       </div>
       <div className={styles.apiKeyInput} style={fieldStyle}>
@@ -338,29 +469,25 @@ const ProviderSetting = () => {
           onChange={(event) => setProviderConfig({ piBaseUrl: event.target.value })}
         />
       </div>
-      <div className={styles.apiKeyInput} style={fieldStyle}>
-        <input
-          type="password"
-          placeholder={t('settingsProviderApiKey')}
-          autoComplete="off"
-          spellCheck={false}
-          value={provider.apiKey}
-          onChange={(event) => setProviderConfig({ apiKey: event.target.value })}
+      <div className={styles.label} style={fieldStyle}>
+        {t('settingsProviderPiApi')}
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <Select
+          ariaLabel={t('settingsProviderPiApi')}
+          className={styles.fieldSelect}
+          value={provider.piApi}
+          options={PI_APIS.map((api) => ({ value: api, label: api }))}
+          onChange={(piApi) => setProviderConfig({ piApi })}
         />
       </div>
-      <div className={styles.apiKeyInput} style={fieldStyle}>
-        <input
-          placeholder={t('settingsProviderModel')}
-          autoComplete="off"
-          spellCheck={false}
-          value={provider.model}
-          onChange={(event) => setProviderConfig({ model: event.target.value })}
-        />
+      <div className={styles.label} style={fieldStyle}>
+        {t('settingsProviderContextWindow')}
       </div>
-      <div className={styles.apiKeyInput} style={fieldStyle}>
+      <div className={styles.apiKeyInput} style={{ marginTop: 8 }}>
         <input
           inputMode="numeric"
-          placeholder={t('settingsProviderContextWindow')}
+          placeholder={t('settingsProviderAuto')}
           autoComplete="off"
           spellCheck={false}
           value={provider.contextWindow ?? ''}
@@ -372,10 +499,13 @@ const ProviderSetting = () => {
           }}
         />
       </div>
-      <div className={styles.apiKeyInput} style={fieldStyle}>
+      <div className={styles.label} style={fieldStyle}>
+        {t('settingsProviderMaxTokens')}
+      </div>
+      <div className={styles.apiKeyInput} style={{ marginTop: 8 }}>
         <input
           inputMode="numeric"
-          placeholder={t('settingsProviderMaxTokens')}
+          placeholder={t('settingsProviderAuto')}
           autoComplete="off"
           spellCheck={false}
           value={provider.maxTokens ?? ''}
@@ -386,6 +516,25 @@ const ProviderSetting = () => {
             })
           }}
         />
+      </div>
+      <div className={styles.label} style={fieldStyle}>
+        {t('settingsProviderModalities')}
+      </div>
+      <div className={styles.modalities}>
+        {INPUT_MODALITIES.map((modality) => (
+          <label
+            key={modality}
+            className={clsx(styles.modality, modality === 'text' && styles.modalityLocked)}
+          >
+            <input
+              type="checkbox"
+              checked={modalities.includes(modality)}
+              disabled={modality === 'text'}
+              onChange={() => toggleModality(modality)}
+            />
+            {t(MODALITY_LABELS[modality])}
+          </label>
+        ))}
       </div>
     </div>
   )

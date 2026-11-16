@@ -20,6 +20,13 @@ export const PI_APIS = [
   'mistral-conversations',
 ] as const
 
+/**
+ * 模型声明的输入模态。pi-ai 只区分 text / image；
+ * audio / video 作为能力标注保留，发送侧只取前两种。
+ */
+export const INPUT_MODALITIES = ['text', 'image', 'audio', 'video'] as const
+export type InputModality = (typeof INPUT_MODALITIES)[number]
+
 /** 所有模型请求统一由 pi-ai 发出；工具 API 与模型共用 provider.apiKey */
 export type ProviderConfig = {
   /** 模型与工具 API 共用的 Key；留空时回退旧版单独保存的 settings.apiKey */
@@ -36,6 +43,8 @@ export type ProviderConfig = {
   contextWindow: number | null
   /** 最大输出；null 表示按内置模型目录自动匹配，匹配不到用 384k */
   maxTokens: number | null
+  /** 输入模态；null 表示按内置模型目录自动匹配，文本始终可用 */
+  inputModalities: InputModality[] | null
 }
 
 const DEFAULT_PROVIDER: ProviderConfig = {
@@ -46,10 +55,23 @@ const DEFAULT_PROVIDER: ProviderConfig = {
   piBaseUrl: '',
   contextWindow: null,
   maxTokens: null,
+  inputModalities: null,
 }
 
 const positiveOrNull = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : null
+
+/** 读取模态数组：非法或空值视为自动，文本始终补齐 */
+const readModalities = (value: unknown): InputModality[] | null => {
+  if (!Array.isArray(value)) {
+    return null
+  }
+  const picked = INPUT_MODALITIES.filter((modality) => value.includes(modality))
+  if (picked.length === 0) {
+    return null
+  }
+  return picked.includes('text') ? picked : ['text', ...picked]
+}
 
 /** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、深度思考与智能搜索开关、侧边栏收起状态 */
 type Settings = {
@@ -151,6 +173,7 @@ const readProvider = (): ProviderConfig => {
       piBaseUrl: parsed.piBaseUrl ?? '',
       contextWindow: positiveOrNull(parsed.contextWindow),
       maxTokens: positiveOrNull(parsed.maxTokens),
+      inputModalities: readModalities(parsed.inputModalities),
     }
   } catch {
     return DEFAULT_PROVIDER

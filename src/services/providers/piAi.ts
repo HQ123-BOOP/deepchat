@@ -48,11 +48,15 @@ export type PiAiConfig = {
   contextWindow?: number | null
   /** 手动覆盖的最大输出；缺省时按内置模型目录匹配 */
   maxTokens?: number | null
+  /** 手动声明的输入模态；缺省时按内置模型目录匹配 */
+  inputModalities?: string[] | null
 }
 
 /** 目录匹配不到时的兜底值 */
 const DEFAULT_CONTEXT_WINDOW = 1_048_576
 const DEFAULT_MAX_TOKENS = 393_216
+/** 目录匹配不到时按文本模型处理，避免把图片发给不支持视觉的端点 */
+const DEFAULT_INPUT: Model<Api>['input'] = ['text']
 
 /** 各协议的官方默认端点；自建服务可在设置里覆盖 */
 const DEFAULT_BASE_URLS: Record<string, string> = {
@@ -108,6 +112,18 @@ const emptyUsage = (): AssistantMessage['usage'] => ({
 const isDeepSeekConfig = (config: PiAiConfig): boolean =>
   config.provider === 'deepseek' || resolvePiBaseUrl(config).includes('deepseek.com')
 
+/**
+ * 请求侧只认文本与图像：pi-ai 不支持音频/视频输入，
+ * 这两项在设置里仅作为能力标注保留。
+ */
+const resolveInput = (config: PiAiConfig, builtin?: Model<Api>): Model<Api>['input'] => {
+  const declared = config.inputModalities?.length
+    ? config.inputModalities
+    : builtin?.input ?? DEFAULT_INPUT
+  const supported = declared.includes('image') ? ['text', 'image'] : ['text']
+  return supported as Model<Api>['input']
+}
+
 const buildModel = (config: PiAiConfig, modelId: string): Model<Api> => {
   const builtin = lookupBuiltin(config, modelId)
   const model = {
@@ -118,7 +134,7 @@ const buildModel = (config: PiAiConfig, modelId: string): Model<Api> => {
     baseUrl: resolvePiBaseUrl(config),
     // 档位关闭时仍保持 reasoning=true，交给 reasoningEffort 缺省表达「关闭思考」
     reasoning: builtin?.reasoning ?? true,
-    input: builtin?.input ?? ['text', 'image'],
+    input: resolveInput(config, builtin),
     cost: builtin?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     // 目录里没有该模型时按 1M / 384k 兜底，用户可在设置里覆盖
     contextWindow: config.contextWindow ?? builtin?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
@@ -266,6 +282,7 @@ export const createConfiguredPiProvider = (): ChatProvider => {
     apiKey: provider.apiKey.trim() || apiKey?.trim() || '',
     contextWindow: provider.contextWindow,
     maxTokens: provider.maxTokens,
+    inputModalities: provider.inputModalities,
   })
 }
 
