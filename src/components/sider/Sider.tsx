@@ -222,12 +222,13 @@ const insideHorizontalScroller = (node: Element | null): boolean => {
 export const MobileSider = () => {
   const open = useMobileSider((state) => state.open)
   const drawerRef = useRef<HTMLDivElement>(null)
-  // 拖动中的位移与遮罩透明度；null 表示没有拖动，交给 CSS 过渡
-  const [drag, setDrag] = useState<{ x: number; opacity: number } | null>(null)
+  const maskRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let startX = 0
     let startY = 0
+    let startTime = 0
+    let lastDx = 0
     let base = 0
     let width = 0
     let offset = 0
@@ -259,10 +260,19 @@ export const MobileSider = () => {
       }
       startX = touch.clientX
       startY = touch.clientY
+      startTime = Date.now()
+      lastDx = 0
       base = isOpen ? 0 : -width
       offset = base
       active = true
       horizontal = false
+      // 拖动期间关掉过渡，让抽屉严格跟手；松手后再交还给 CSS
+      if (drawerRef.current) {
+        drawerRef.current.style.transition = 'none'
+      }
+      if (maskRef.current) {
+        maskRef.current.style.transition = 'none'
+      }
     }
 
     const move = (event: TouchEvent) => {
@@ -273,12 +283,18 @@ export const MobileSider = () => {
       const dx = touch.clientX - startX
       const dy = touch.clientY - startY
       if (!horizontal) {
-        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) {
+        if (Math.abs(dx) < 5 && Math.abs(dy) < 5) {
           return
         }
         // 纵向手势交还给页面滚动
         if (Math.abs(dx) <= Math.abs(dy)) {
           active = false
+          if (drawerRef.current) {
+            drawerRef.current.style.removeProperty('transition')
+          }
+          if (maskRef.current) {
+            maskRef.current.style.removeProperty('transition')
+          }
           return
         }
         horizontal = true
@@ -286,8 +302,15 @@ export const MobileSider = () => {
       if (event.cancelable) {
         event.preventDefault()
       }
+      lastDx = dx
       offset = Math.min(0, Math.max(-width, base + dx))
-      setDrag({ x: offset, opacity: 1 + offset / width })
+      // 直接写 DOM，不等 React 重渲染，避免抽屉慢半拍
+      if (drawerRef.current) {
+        drawerRef.current.style.transform = `translate3d(${offset}px, 0, 0)`
+      }
+      if (maskRef.current) {
+        maskRef.current.style.opacity = String(1 + offset / width)
+      }
     }
 
     const end = () => {
@@ -300,12 +323,25 @@ export const MobileSider = () => {
       if (!dragged) {
         return
       }
-      if (offset > -width / 2) {
+      const quickFlick = Date.now() - startTime < 280 && Math.abs(lastDx) > 40
+      const threshold = Math.min(80, width * 0.3)
+      const shouldOpen = quickFlick ? lastDx > 0 : offset > -threshold
+      if (shouldOpen) {
         openMobileSider()
       } else {
         closeMobileSider()
       }
-      setDrag(null)
+      // 下一帧移除内联值，让 CSS 过渡从当前位置滑到最终位置
+      requestAnimationFrame(() => {
+        if (drawerRef.current) {
+          drawerRef.current.style.removeProperty('transition')
+          drawerRef.current.style.removeProperty('transform')
+        }
+        if (maskRef.current) {
+          maskRef.current.style.removeProperty('transition')
+          maskRef.current.style.removeProperty('opacity')
+        }
+      })
     }
 
     document.addEventListener('touchstart', start, { passive: true })
@@ -324,14 +360,13 @@ export const MobileSider = () => {
   return (
     <>
       <div
+        ref={maskRef}
         className={clsx(styles.drawerMask, open && styles.drawerMaskOpen)}
-        style={drag ? { opacity: drag.opacity, transition: 'none' } : undefined}
         onClick={closeMobileSider}
       />
       <div
         ref={drawerRef}
         className={clsx(styles.drawer, open && styles.drawerOpen)}
-        style={drag ? { transform: `translateX(${drag.x}px)`, transition: 'none' } : undefined}
         aria-hidden={!open}
       >
         <Sider mobile />

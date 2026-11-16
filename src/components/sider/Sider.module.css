@@ -253,6 +253,7 @@
   transform: translateX(-100%);
   transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
   will-change: transform;
+  touch-action: pan-y;
 }
 
 .drawerOpen {
@@ -267,6 +268,7 @@
   opacity: 0;
   pointer-events: none;
   transition: opacity 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  touch-action: pan-y;
 }
 
 .drawerMaskOpen {
