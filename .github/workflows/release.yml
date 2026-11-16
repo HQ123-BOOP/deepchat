@@ -116,10 +116,12 @@ jobs:
         run: |
           set -euo pipefail
           notes=artifacts/release-notes/release-notes.md
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "$TAG" --notes-file "$notes"
+          # 本任务没有 checkout，明确指定仓库，避免 gh 依赖本地 .git
+          repo="$GITHUB_REPOSITORY"
+          if gh release view "$TAG" -R "$repo" >/dev/null 2>&1; then
+            gh release edit "$TAG" -R "$repo" --title "$TAG" --notes-file "$notes"
           else
-            gh release create "$TAG" --title "$TAG" --notes-file "$notes"
+            gh release create "$TAG" -R "$repo" --title "$TAG" --notes-file "$notes"
           fi
           shopt -s nullglob
           files=(artifacts/windows-bundles/nsis/*.exe artifacts/windows-bundles/msi/*.msi)
@@ -127,4 +129,4 @@ jobs:
             echo "no desktop bundles found" >&2
             exit 1
           fi
-          gh release upload "$TAG" "${files[@]}" --clobber
+          gh release upload "$TAG" -R "$repo" "${files[@]}" --clobber
