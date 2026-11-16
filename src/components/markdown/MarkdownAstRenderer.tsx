@@ -1,4 +1,13 @@
-import { createElement, memo, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
+import {
+  createContext,
+  createElement,
+  memo,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from 'react'
 import clsx from 'clsx'
 import type {
   BlockContent,
@@ -145,11 +154,50 @@ const MarkdownPhrasingContentItem = memo(function MarkdownPhrasingContentItem({
   }
 })
 
-// 按 \n 拆行插 <br>：源文每个换行（含软换行）都渲染为视觉换行
+// 按 \n 拆行插 <br>：源文每个换行（含软换行）都渲染为视觉换行。
+// 流式输出时只给新出现的字符包一层淡入 span，旧字符保持纯文本，避免整段重播动画。
+const StreamingContext = createContext(false)
+
 const TextContent = memo(function TextContent({ children }: { children: string }) {
+  const streaming = useContext(StreamingContext)
+  const previous = useRef('')
+  useLayoutEffect(() => {
+    previous.current = children
+  })
+  if (!streaming) {
+    const plain: ReactNode[] = []
+    children.split(/\r?\n/).forEach((line, index) => {
+      plain.push(<span key={index + 's'}>{line}</span>, <br key={index + 'br'} />)
+    })
+    plain.pop()
+    return plain
+  }
+  const current = Array.from(children)
+  const before = Array.from(previous.current)
+  let stable = 0
+  while (stable < current.length && stable < before.length && current[stable] === before[stable]) {
+    stable += 1
+  }
+
   const result: ReactNode[] = []
+  let offset = 0
   children.split(/\r?\n/).forEach((line, index) => {
-    result.push(<span key={index + 's'}>{line}</span>, <br key={index + 'br'} />)
+    const chars = Array.from(line)
+    result.push(
+      <span key={index + 's'}>
+        {chars.map((char, charIndex) =>
+          offset + charIndex < stable ? (
+            char
+          ) : (
+            <span key={offset + charIndex} className="ds-stream-char">
+              {char}
+            </span>
+          )
+        )}
+      </span>,
+      <br key={index + 'br'} />
+    )
+    offset += chars.length + 1
   })
   result.pop()
   return result
@@ -236,10 +284,12 @@ export const MarkdownAstRenderer = memo(function MarkdownAstRenderer({
     () => (
       <div className={clsx('ds-markdown', className)}>
         {/* 解析器在根节点下产出块级内容。 */}
-        <MarkdownBlockContentOrDefinitionContent
-          nodes={ast.children as Array<BlockContent | DefinitionContent>}
-          loading={loading}
-        />
+        <StreamingContext.Provider value={loading}>
+          <MarkdownBlockContentOrDefinitionContent
+            nodes={ast.children as Array<BlockContent | DefinitionContent>}
+            loading={loading}
+          />
+        </StreamingContext.Provider>
       </div>
     ),
     [className, ast.children, loading]

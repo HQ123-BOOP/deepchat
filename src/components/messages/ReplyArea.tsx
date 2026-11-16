@@ -92,7 +92,10 @@ export const ReplyArea = memo(function ReplyArea({
           {open ? <IconChevronDownOutline14 /> : <IconChevronRightOutline14 />}
         </div>
       ) : null}
-      {open || !title ? (
+      <div
+        className={clsx(styles.stepsWrap, (!title || open) && styles.stepsWrapOpen)}
+        aria-hidden={title ? !open : undefined}
+      >
         <div className={styles.steps}>
           {view.steps.map((step, index) => (
             <StepItem
@@ -105,7 +108,7 @@ export const ReplyArea = memo(function ReplyArea({
             />
           ))}
         </div>
-      ) : null}
+      </div>
     </div>
   )
 })

@@ -1,5 +1,8 @@
 declare const styles: {
   readonly "area": string;
+  readonly "stepsWrap": string;
+  readonly "stepsWrapOpen": string;
+  readonly "steps": string;
   readonly "title": string;
   readonly "titleIcon": string;
   readonly "stoppedIcon": string;

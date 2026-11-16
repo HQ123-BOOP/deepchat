@@ -378,3 +378,18 @@
   color: var(--dsw-alias-label-secondary);
   font-size: 14px;
 }
+
+/* 流式输出时新出现的字符逐个淡入；旧字符不加动画，避免整段重播 */
+.ds-stream-char {
+  animation: ds-stream-char-in 110ms ease-out both;
+}
+
+@keyframes ds-stream-char-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
