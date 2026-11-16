@@ -21,5 +21,8 @@ declare const styles: {
   readonly "mobile": string;
   readonly "group": string;
   readonly "groupTitle": string;
+  readonly "groupBody": string;
+  readonly "groupBodyOpen": string;
+  readonly "groupBodyInner": string;
 };
 export = styles;

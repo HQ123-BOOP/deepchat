@@ -25,6 +25,8 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const groups = useMemo(() => groupSessions(sessions, now, t), [sessions, now, t])
   const [deleting, setDeleting] = useState<SessionSummary | null>(null)
   const [deletePending, setDeletePending] = useState(false)
+  // 对话分组默认展开；收起/展开用高度过渡，内容整体推动
+  const [chatGroupOpen, setChatGroupOpen] = useState(true)
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>
@@ -80,22 +82,33 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
       </button>
       <div className={styles.listWrap}>
         <div className={styles.list}>
-          <details className={styles.group} open>
-            <summary className={styles.groupTitle}>{t('siderChatGroup')}</summary>
-            {groups.map((group) => (
-              <div key={group.key} className={styles.section}>
-                <div className={styles.sectionHeader}>{group.label}</div>
-                {group.sessions.map((session) => (
-                  <SessionItem
-                    key={session.id}
-                    session={session}
-                    active={session.id === activeId}
-                    onDelete={() => setDeleting(session)}
-                  />
+          <div className={styles.group}>
+            <button
+              type="button"
+              className={styles.groupTitle}
+              aria-expanded={chatGroupOpen}
+              onClick={() => setChatGroupOpen((value) => !value)}
+            >
+              {t('siderChatGroup')}
+            </button>
+            <div className={clsx(styles.groupBody, chatGroupOpen && styles.groupBodyOpen)}>
+              <div className={styles.groupBodyInner}>
+                {groups.map((group) => (
+                  <div key={group.key} className={styles.section}>
+                    <div className={styles.sectionHeader}>{group.label}</div>
+                    {group.sessions.map((session) => (
+                      <SessionItem
+                        key={session.id}
+                        session={session}
+                        active={session.id === activeId}
+                        onDelete={() => setDeleting(session)}
+                      />
+                    ))}
+                  </div>
                 ))}
               </div>
-            ))}
-          </details>
+            </div>
+          </div>
         </div>
       </div>
       <div className={styles.bottom}>

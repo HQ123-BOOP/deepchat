@@ -1,14 +1,28 @@
+/* 收起时宽度为 0，展开时推到目标宽度，flex 兄弟（对话区）随之被推开 */
 .panel {
-  display: flex;
-  flex-direction: column;
   flex-shrink: 0;
   box-sizing: border-box;
-  width: calc(50vw - 4rem);
-  max-width: 390px;
+  width: 0;
   height: 100%;
-  border-left: 1px solid var(--dsw-alias-border-l2);
+  overflow: hidden;
+  transition: width 260ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.panelOpen {
+  width: min(390px, calc(50vw - 4rem));
+}
+
+/* 内容保持展开时的固定宽度，动画期间不重新排版 */
+.panelInner {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(390px, calc(50vw - 4rem));
+  height: 100%;
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-bg-base);
+  /* 用内阴影画分隔线，避免 border 占宽导致内容被裁 1px */
+  box-shadow: inset 1px 0 0 var(--dsw-alias-border-l2);
 }
 
 .header {
@@ -55,12 +69,26 @@
 }
 
 @media not all and (min-width: 768px) {
+  /* 移动端是全屏抽屉，改从右侧滑入 */
   .panel {
     position: fixed;
     inset: 0;
     z-index: 700;
     width: auto;
     max-width: none;
-    border-left: none;
+    pointer-events: none;
+    transform: translateX(100%);
+    transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .panelOpen {
+    width: auto;
+    pointer-events: auto;
+    transform: translateX(0);
+  }
+
+  .panelInner {
+    width: 100%;
+    max-width: none;
   }
 }
