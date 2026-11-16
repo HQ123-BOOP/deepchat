@@ -226,6 +226,35 @@
   overflow: hidden;
 }
 
+/* 附件解析记录：文件名可点开，右侧是页数与字符数 */
+.attachment {
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  overflow: hidden;
+  font: inherit;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--dsw-alias-label-caption);
+  text-underline-offset: 4px;
+  transition: color 0.2s;
+}
+
+.attachment:hover {
+  color: var(--dsw-alias-brand-primary);
+}
+
+.attachmentMeta {
+  margin-left: 8px;
+  color: var(--dsw-alias-label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
 .intro {
   display: inline-block;
   margin-right: 6px;

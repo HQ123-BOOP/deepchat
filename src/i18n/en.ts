@@ -176,6 +176,8 @@ export const en = {
   attachFile: 'Attach file',
   fileTextViewerTitle: 'Recognized text',
   fileTextViewerMeta: '{pages} pages · {chars} characters',
+  attachmentParsed: 'Parsed {pages} pages · {chars} characters',
+  attachmentParsing: 'Parsing {name}',
   reasoningLevel: 'Reasoning',
   reasoningOff: 'Off',
   reasoningLow: 'Low',

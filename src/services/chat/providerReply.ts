@@ -140,8 +140,31 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
       } else if (event.type === 'tool_start') {
         // 工具调用说明思考阶段已结束
         closeThinking(Date.now())
-        // 附件解析与续读只回填给模型，不生成联网步骤卡片
-        if (event.call.name === 'ocr_file' || event.call.name === 'read') {
+        // 附件解析先占一行「解析中」，完成后再补页数与字符数
+        if (event.call.name === 'ocr_file') {
+          let args: Record<string, unknown> = {}
+          try {
+            args = event.call.arguments
+              ? (JSON.parse(event.call.arguments) as Record<string, unknown>)
+              : {}
+          } catch {
+            args = {}
+          }
+          const fileId = typeof args.file_id === 'string' ? args.file_id : ''
+          pushBlock({
+            type: 'attachment_parse',
+            id: toolUseId(event.call.id),
+            fileId,
+            name: options.fileNames?.[fileId] ?? fileId,
+            status: 'parsing',
+            pages: 0,
+            chars: 0,
+          })
+          options.onChange(reply)
+          continue
+        }
+        // 续读只回填给模型，不重复展示
+        if (event.call.name === 'read') {
           continue
         }
         // 未知工具不冒充搜索，等失败结果里再显示「未知工具」
@@ -201,7 +224,34 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
           options.onChange(reply)
           continue
         }
-        if (event.call.name === 'ocr_file' || event.call.name === 'read') {
+        // 解析完成后把「解析中」那一行替换成带页数与字符数的记录
+        if (event.call.name === 'ocr_file') {
+          if (event.attachment) {
+            const blockId = toolUseId(event.call.id)
+            const next: ReplyBlock = {
+              type: 'attachment_parse',
+              id: blockId,
+              fileId: event.attachment.id,
+              name: event.attachment.name,
+              status: 'done',
+              pages: event.attachment.pages,
+              chars: event.attachment.chars,
+            }
+            const index = reply.blocks.findIndex(
+              (block) => 'id' in block && block.id === blockId
+            )
+            reply = {
+              ...reply,
+              blocks:
+                index >= 0
+                  ? [...reply.blocks.slice(0, index), next, ...reply.blocks.slice(index + 1)]
+                  : [...reply.blocks, next],
+            }
+            options.onChange(reply)
+          }
+          continue
+        }
+        if (event.call.name === 'read') {
           continue
         }
         if (event.call.name === 'read_url') {

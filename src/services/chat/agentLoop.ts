@@ -7,6 +7,7 @@
 import {
   classifyToolFailure,
   runTool,
+  type AttachmentSummary,
   type ParsedAttachment,
   type ToolFailureCode,
   type ToolSource,
@@ -32,6 +33,8 @@ export type AgentEvent =
       error?: string
       /** 失败分类，供 UI 显示具体原因 */
       failure?: { code: ToolFailureCode; tool: string; status: number }
+      /** 附件解析结果，供 UI 显示一行可点开的记录 */
+      attachment?: AttachmentSummary
     }
   | { type: 'done'; stopReason: 'stop' | 'length' | 'tool_limit' | 'error'; error?: string }
 
@@ -136,6 +139,7 @@ export async function* runAgent(
       yield { type: 'tool_start', call }
       let content: string
       let sources: ToolSource[] = []
+      let attachment: AttachmentSummary | undefined
       let ok = true
       try {
         const parsed = call.arguments ? (JSON.parse(call.arguments) as Record<string, unknown>) : {}
@@ -149,6 +153,7 @@ export async function* runAgent(
         })
         content = result.content
         sources = result.sources
+        attachment = result.attachment
       } catch (error) {
         ok = false
         const failure = classifyToolFailure(call.name, error)
@@ -164,7 +169,7 @@ export async function* runAgent(
         messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content })
         continue
       }
-      yield { type: 'tool_result', call, sources, ok }
+      yield { type: 'tool_result', call, sources, ok, attachment }
       messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content })
     }
 

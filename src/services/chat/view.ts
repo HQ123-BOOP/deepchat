@@ -72,6 +72,17 @@ export type ToolErrorStep = {
   code: ToolErrorCode
 }
 
+/** 附件解析：一行记录，完成后可点开查看全文 */
+export type AttachmentStep = {
+  type: 'attachment'
+  key: string
+  fileId: string
+  name: string
+  status: 'parsing' | 'done'
+  pages: number
+  chars: number
+}
+
 export type ThinkingStep = { type: 'thinking'; key: string; blocks: ThinkingPart[] }
 
 /** 工具调用前输出的说明文字 */
@@ -85,6 +96,7 @@ export type Step =
   | ThinkingStep
   | PreambleStep
   | ToolErrorStep
+  | AttachmentStep
 
 export type ReplyView = {
   steps: Step[]
@@ -267,6 +279,19 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
     if (block.type === 'tool_error') {
       flushPreamble()
       steps.push({ type: 'tool_error', key: block.id, tool: block.tool, code: block.code })
+      return
+    }
+    if (block.type === 'attachment_parse') {
+      flushPreamble()
+      steps.push({
+        type: 'attachment',
+        key: block.id,
+        fileId: block.fileId,
+        name: block.name,
+        status: block.status,
+        pages: block.pages,
+        chars: block.chars,
+      })
       return
     }
     if (block.type !== 'server_tool_use') {

@@ -139,6 +139,16 @@ export type ToolRunResult = {
   content: string
   /** 供 UI 渲染的来源 */
   sources: ToolSource[]
+  /** 附件解析结果，供 UI 显示一行可点开的记录 */
+  attachment?: AttachmentSummary
+}
+
+/** UI 展示解析结果所需的元数据，不含全文 */
+export type AttachmentSummary = {
+  id: string
+  name: string
+  pages: number
+  chars: number
 }
 
 /** 工具失败分类：未知工具 / 参数错 / 404 / 服务不可用 */
@@ -300,6 +310,7 @@ export const runTool = async (
     return {
       content: `${lines.join('\n')}\n\n${head}`,
       sources: [],
+      attachment: { id, name: fileName, pages: result.page_count, chars: text.length },
     }
   }
   if (name === 'read') {

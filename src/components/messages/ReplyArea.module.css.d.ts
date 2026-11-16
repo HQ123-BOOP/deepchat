@@ -23,6 +23,8 @@ declare const styles: {
   readonly "tool": string;
   readonly "toolIcon": string;
   readonly "toolBody": string;
+  readonly "attachment": string;
+  readonly "attachmentMeta": string;
   readonly "intro": string;
   readonly "page": string;
   readonly "pageText": string;

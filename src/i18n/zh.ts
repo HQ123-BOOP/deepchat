@@ -167,6 +167,8 @@ export const zh = {
   attachFile: '附件',
   fileTextViewerTitle: '识别文本',
   fileTextViewerMeta: '共 {pages} 页 · {chars} 字符',
+  attachmentParsed: '已解析 {pages} 页 · {chars} 字符',
+  attachmentParsing: '正在解析 {name}',
   reasoningLevel: '推理等级',
   reasoningOff: 'Off',
   reasoningLow: 'Low',

@@ -9,17 +9,20 @@ import {
   IconCheckedOutline14,
   IconCloseFill14,
   IconLinkOutline16,
+  IconPaperclipOutline16,
   IconRightUpOutline14,
   IconSearchOutline16,
   IconSearchWarningOutline16,
   IconThinkOutline16,
   IconWarningOutline16,
 } from '../base/icons.js'
+import { loadFileText, type StoredFileText } from '../../services/chat/db.js'
 import type { AssistantMessage } from '../../services/chat/types.js'
 import {
   getAreaTitle,
   isDeepSearchKind,
   isImageSearchKind,
+  type AttachmentStep,
   type FindStep,
   type OpenStep,
   type PageItem,
@@ -31,6 +34,7 @@ import {
   type ToolErrorStep,
 } from '../../services/chat/view.js'
 import { Tooltip } from '../base/Tooltip.js'
+import { FileTextViewer } from '../files/FileTextViewer.js'
 import { Markdown } from '../markdown/Markdown.js'
 import { SiteThumbnails } from '../search/SiteLogo.js'
 import { toggleSearchPanel, useSearchPanel } from '../search/searchPanelState.js'
@@ -167,6 +171,8 @@ const StepItem = ({
           <span>{toolErrorText(step, t)}</span>
         </ToolRow>
       )
+    case 'attachment':
+      return <AttachmentRow step={step} isLast={isLast} />
     default:
       return null
   }
@@ -305,6 +311,39 @@ const ToolRow = ({
     <div className={styles.toolBody}>{children}</div>
   </div>
 )
+
+/** 附件解析成功：一行记录，点开查看应用内保存的识别文本 */
+const AttachmentRow = ({ step, isLast }: { step: AttachmentStep; isLast: boolean }) => {
+  const t = useTranslate()
+  const [doc, setDoc] = useState<StoredFileText | null>(null)
+  const open = async () => {
+    const next = await loadFileText(step.fileId)
+    if (next) {
+      setDoc(next)
+    }
+  }
+  return (
+    <>
+      <ToolRow icon={<IconPaperclipOutline16 />} isLast={isLast}>
+        {step.status === 'parsing' ? (
+          <span className={clsx(styles.intro, styles.shimmer)}>
+            {t('attachmentParsing', { name: step.name })}
+          </span>
+        ) : (
+          <>
+            <button type="button" className={styles.attachment} onClick={open}>
+              {step.name}
+            </button>
+            <span className={styles.attachmentMeta}>
+              {t('attachmentParsed', { pages: step.pages, chars: step.chars.toLocaleString() })}
+            </span>
+          </>
+        )}
+      </ToolRow>
+      {doc ? <FileTextViewer doc={doc} onClose={() => setDoc(null)} /> : null}
+    </>
+  )
+}
 
 const PageLink = ({ page, failedTip }: { page: PageItem; failedTip?: string }) => (
   <span

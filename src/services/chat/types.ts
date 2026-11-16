@@ -74,7 +74,23 @@ export type ToolErrorPart = {
   status?: number
 }
 
-export type ReplyBlock = ThinkingPart | TextPart | ServerToolBlock | ToolErrorPart
+/** 附件解析记录：parsing 时只有文件名，done 后补上页数与字符数；全文在 fileTexts 里 */
+export type AttachmentParsePart = {
+  type: 'attachment_parse'
+  id: string
+  fileId: string
+  name: string
+  status: 'parsing' | 'done'
+  pages: number
+  chars: number
+}
+
+export type ReplyBlock =
+  | ThinkingPart
+  | TextPart
+  | ServerToolBlock
+  | ToolErrorPart
+  | AttachmentParsePart
 
 /**
  * pending：已发出请求，还没收到事件；streaming：正在接收；
