@@ -17,18 +17,23 @@ export const AttachmentSheet = ({
   onGallery,
   onFiles,
   onPickPhoto,
+  onRemovePhoto,
 }: {
   open: boolean
   onCamera: () => void
   onGallery: () => void
   onFiles: () => void
-  onPickPhoto: (file: File) => void
+  /** 返回新附件 id；拿不到 id 时不标记为已选 */
+  onPickPhoto: (file: File) => string | undefined
+  /** 再次点击已选照片时从草稿里移除 */
+  onRemovePhoto: (attachmentId: string) => void
 }) => {
   const t = useTranslate()
   const [photos, setPhotos] = useState<RecentPhoto[]>([])
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
-  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  // 照片 id → 草稿附件 id；再次点击时按附件 id 删除
+  const [selected, setSelected] = useState<Map<string, string>>(() => new Map())
   const loaded = useRef(false)
 
   useEffect(() => {
@@ -50,7 +55,18 @@ export const AttachmentSheet = ({
   }, [open])
 
   const choose = async (photo: RecentPhoto) => {
-    if (busy || selected.has(photo.id)) {
+    if (busy) {
+      return
+    }
+    // 已选中的照片再点一次：取消勾选并移除对应附件
+    const attached = selected.get(photo.id)
+    if (attached !== undefined) {
+      onRemovePhoto(attached)
+      setSelected((prev) => {
+        const next = new Map(prev)
+        next.delete(photo.id)
+        return next
+      })
       return
     }
     setBusy(photo.id)
@@ -60,15 +76,17 @@ export const AttachmentSheet = ({
       showToast({ key: 'attachmentPhotoFailed', type: 'error' })
       return
     }
-    // 选中后不收起面板，方便继续多选；已选的显示勾选、不再重复添加
-    setSelected((prev) => new Set(prev).add(photo.id))
-    onPickPhoto(file)
+    // 选中后不收起面板，方便继续多选；记下附件 id 以便再次点击取消
+    const attachmentId = onPickPhoto(file)
+    if (attachmentId !== undefined) {
+      setSelected((prev) => new Map(prev).set(photo.id, attachmentId))
+    }
   }
 
   // 每次收起后清空选中态，下次打开可重新挑选
   useEffect(() => {
     if (!open) {
-      setSelected(new Set())
+      setSelected(new Map())
     }
   }, [open])
 

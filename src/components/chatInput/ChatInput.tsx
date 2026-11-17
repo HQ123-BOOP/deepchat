@@ -98,14 +98,17 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [isMobile, sheetOpen])
 
-  const acceptFiles = (files: File[]) => {
+  /** 添加附件；返回第一个附件 id，供相册面板再次点击时取消选择 */
+  const acceptFiles = (files: File[]): string | undefined => {
     if (files.length === 0 || useChatStore.getState().importingHistory || !ensureApiKey()) {
       return
     }
-    const error = addDraftFiles(sessionId, files, useSettings.getState().apiKey ?? '')
+    const { error, ids } = addDraftFiles(sessionId, files, useSettings.getState().apiKey ?? '')
     if (error) {
       showToast(error)
+      return
     }
+    return ids[0]
   }
   const retryFile = useCallback(
     (id: string) => {
@@ -361,6 +364,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
             fileInputRef.current?.click()
           }}
           onPickPhoto={(file) => acceptFiles([file])}
+          onRemovePhoto={removeFile}
         />
       ) : null}
     </>
