@@ -248,70 +248,117 @@ export type ArchiveEntry = {
 }
 
 /**
- * 按条目在文件中的物理顺序逐条、逐块解压，跳过目录条目。
- * 调用方必须消费完当前条目的数据，再请求下一个条目。
- * onProgress 在每条数据处理完成后回调，total 为不含目录的条目总数。
+ * 解压单个条目：逐块读取、同步 inflate、校验 CRC 与大小。
+ * onChunk 回调已解压比例，用于大图片的进度显示。
  */
-export async function* readArchive(
+const inflateEntry = async function* (
   file: File,
-  onProgress?: (done: number, total: number) => void
-): AsyncGenerator<ArchiveEntry> {
-  const directory = await getDirectory(file)
-  const total = directory.entries.filter((entry) => !entry.path.endsWith('/')).length
-  let done = 0
-  for (const [index, entry] of directory.entries.entries()) {
-    const boundary = directory.entries[index + 1]?.offset ?? directory.offset
-    const start = await readEntryOffset(file, entry, boundary)
-    if (entry.path.endsWith('/')) {
+  entry: Entry,
+  start: number,
+  onChunk?: (fraction: number) => void
+): AsyncGenerator<Uint8Array> {
+  let written = 0
+  let crc = 0xffffffff
+  const pending: Uint8Array[] = []
+  const append = (chunk: Uint8Array) => {
+    written += chunk.length
+    if (written > entry.size) {
+      invalid()
+    }
+    for (const byte of chunk) {
+      crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 0xff]
+    }
+    if (chunk.length) {
+      pending.push(chunk)
+    }
+  }
+  const inflate = entry.method === 8 ? new Inflate(append) : null
+  for (let offset = 0; offset < entry.compressedSize; offset += READ_CHUNK_BYTES) {
+    const chunk = await readBytes(
+      file,
+      start + offset,
+      Math.min(READ_CHUNK_BYTES, entry.compressedSize - offset)
+    )
+    // 大图片的解压耗时较长，按已读字节推进度，避免进度条长时间停在原地
+    onChunk?.(Math.min(1, (offset + chunk.length) / Math.max(1, entry.compressedSize)))
+    if (!inflate) {
+      append(chunk)
+      yield* pending.splice(0)
       continue
     }
+    for (let cursor = 0; cursor < chunk.length; cursor += INFLATE_CHUNK_BYTES) {
+      const end = Math.min(cursor + INFLATE_CHUNK_BYTES, chunk.length)
+      inflate.push(chunk.subarray(cursor, end), offset + end === entry.compressedSize)
+      // yield 暂停解压，等待调用方完成异步写入；不缓存整个条目。
+      yield* pending.splice(0)
+    }
+  }
+  if (inflate && entry.compressedSize === 0) {
+    inflate.push(new Uint8Array(), true)
+    yield* pending.splice(0)
+  }
+  if (written !== entry.size || (crc ^ 0xffffffff) >>> 0 !== entry.crc) {
+    invalid()
+  }
+}
+
+/** 中央目录条目名（不含目录条目），按文件内物理顺序排列。 */
+export const listArchivePaths = async (file: File): Promise<string[]> => {
+  const directory = await getDirectory(file)
+  return directory.entries.filter((entry) => !entry.path.endsWith('/')).map((entry) => entry.path)
+}
+
+/**
+ * 读出单个条目（CRC 与大小完整校验）：
+ * 会话 JSON 需要完整解析，图片需要识别类型后整张保存。
+ */
+export const readArchiveEntry = async (
+  file: File,
+  path: string,
+  onFraction?: (fraction: number) => void
+): Promise<Blob> => {
+  const directory = await getDirectory(file)
+  const entry = directory.entries.find((item) => item.path === path)
+  if (!entry) {
+    return invalid()
+  }
+  const position = directory.entries.indexOf(entry)
+  const boundary = directory.entries[position + 1]?.offset ?? directory.offset
+  const start = await readEntryOffset(file, entry, boundary)
+  const parts: Uint8Array[] = []
+  for await (const chunk of inflateEntry(file, entry, start, onFraction)) {
+    parts.push(chunk)
+  }
+  // 保留字节块，交给 Blob 构造器一次性组装，避免上千个小对象。
+  return new Blob(parts as BlobPart[])
+}
+
+/**
+ * 选择性解压：只解压 keep(path) 为真的条目，按文件内物理顺序产出；
+ * 未选中的条目完全不读取。调用方必须消费完当前条目的数据，再请求下一个条目。
+ * onProgress 的 done 只统计已解压条目，total 为选中条目数。
+ */
+export const readSelectedArchive = async function* (
+  file: File,
+  keep: (path: string) => boolean,
+  onProgress?: (done: number, total: number, fraction: number) => void
+): AsyncGenerator<ArchiveEntry> {
+  const directory = await getDirectory(file)
+  const selected = directory.entries.filter(
+    (entry) => !entry.path.endsWith('/') && keep(entry.path)
+  )
+  const total = selected.length
+  let done = 0
+  for (const entry of selected) {
+    const position = directory.entries.indexOf(entry)
+    const boundary = directory.entries[position + 1]?.offset ?? directory.offset
+    const start = await readEntryOffset(file, entry, boundary)
     let completed = false
     const stream = async function* (): AsyncGenerator<Uint8Array> {
-      let written = 0
-      let crc = 0xffffffff
-      const pending: Uint8Array[] = []
-      const append = (chunk: Uint8Array) => {
-        written += chunk.length
-        if (written > entry.size) {
-          invalid()
-        }
-        for (const byte of chunk) {
-          crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 0xff]
-        }
-        if (chunk.length) {
-          pending.push(chunk)
-        }
-      }
-      const inflate = entry.method === 8 ? new Inflate(append) : null
-      for (let offset = 0; offset < entry.compressedSize; offset += READ_CHUNK_BYTES) {
-        const chunk = await readBytes(
-          file,
-          start + offset,
-          Math.min(READ_CHUNK_BYTES, entry.compressedSize - offset)
-        )
-        // 大图片的解压耗时较长，按已读字节推进度，避免进度条长时间停在原地
-        onProgress?.(
-          done + Math.min(1, (offset + chunk.length) / Math.max(1, entry.compressedSize)),
-          total
-        )
-        if (!inflate) {
-          append(chunk)
-          yield* pending.splice(0)
-          continue
-        }
-        for (let cursor = 0; cursor < chunk.length; cursor += INFLATE_CHUNK_BYTES) {
-          const end = Math.min(cursor + INFLATE_CHUNK_BYTES, chunk.length)
-          inflate.push(chunk.subarray(cursor, end), offset + end === entry.compressedSize)
-          // yield 暂停解压，等待调用方完成异步写入；不缓存整个条目。
-          yield* pending.splice(0)
-        }
-      }
-      if (inflate && entry.compressedSize === 0) {
-        inflate.push(new Uint8Array(), true)
-        yield* pending.splice(0)
-      }
-      if (written !== entry.size || (crc ^ 0xffffffff) >>> 0 !== entry.crc) {
-        invalid()
+      for await (const chunk of inflateEntry(file, entry, start, (fraction) =>
+        onProgress?.(done, total, fraction)
+      )) {
+        yield chunk
       }
       completed = true
     }
@@ -320,25 +367,6 @@ export async function* readArchive(
       invalid()
     }
     done += 1
-    onProgress?.(done, total)
-  }
-}
-
-/** 读出整个条目：会话 JSON 需要完整解析，图片需要识别类型后整张保存。 */
-export const readEntry = async (entry: ArchiveEntry): Promise<Blob> => {
-  // 每个 8KB 小块各自建 Blob 会让大图产生上千个对象，最后合并非常慢；
-  // 这里保留字节块，交给 Blob 构造器一次性组装。
-  const parts: Uint8Array[] = []
-  for await (const chunk of entry.stream) {
-    parts.push(chunk)
-  }
-  return new Blob(parts as BlobPart[])
-}
-
-/** 不需要的条目也要读完，以校验大小与 CRC。 */
-export const skipEntry = async (entry: ArchiveEntry): Promise<void> => {
-  const reader = entry.stream[Symbol.asyncIterator]()
-  while (!(await reader.next()).done) {
-    // 丢弃数据。
+    onProgress?.(done, total, 1)
   }
 }
