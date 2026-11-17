@@ -355,6 +355,14 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
           } as WebSearchToolResultBlock)
         }
         options.onChange(reply)
+      } else if (event.type === 'done' && event.stopReason === 'error') {
+        // 请求或流出错：保留已收到的块，但必须把错误抛给界面，不能静默结束
+        reply = settleReply(reply, 'error', Date.now(), {
+          kind: 'stream',
+          message: event.error ?? 'The model request failed',
+        })
+        options.onDone(reply)
+        return reply
       }
     }
     // 收尾时补齐仍未结束的思考块，避免用时停在最后一次 tick
