@@ -89,7 +89,7 @@ export const OCR_TOOL_SCHEMA: ToolSchema = {
 export const READ_TOOL_SCHEMA: ToolSchema = {
   name: 'read',
   description:
-    'Read an attachment or a workspace file as line-numbered text. Plain-text uploads and files created with write are read directly; documents and images must be parsed with ocr_file first. Use offset and limit to continue a long file.',
+    'Read an attachment or a workspace file as line-numbered text. Plain-text uploads and workspace files are read directly; for documents or images, call ocr_file first to save their text. Attached images are already visible to vision models.',
   parameters: {
     type: 'object',
     properties: {
