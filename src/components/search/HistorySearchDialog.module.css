@@ -1,0 +1,150 @@
+.overlay {
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+
+.dialog {
+  width: 560px;
+  gap: 0;
+  padding: 0 0 8px;
+  overflow: hidden;
+}
+
+/* 搜索框直接放进标题栏位置 */
+.searchBar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 10px;
+}
+
+.searchIcon {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--dsw-alias-label-tertiary);
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-s-strong-14);
+
+  &::placeholder {
+    color: var(--dsw-alias-label-tertiary);
+  }
+
+  &:focus {
+    outline: none;
+  }
+}
+
+.clear {
+  margin-right: -10px;
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+.results {
+  max-height: 52vh;
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 14px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.hitHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hitTitle {
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hitDate {
+  flex-shrink: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.hitSnippets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hitSnippet {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 19px;
+  word-break: break-word;
+}
+
+.hitSnippet mark {
+  color: var(--dsw-alias-brand-primary);
+  background: var(--dsw-alias-markdown-tag);
+  border-radius: 4px;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 64px 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+}
