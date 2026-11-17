@@ -494,12 +494,18 @@ export const mergeHistory = async (write: () => Promise<void>): Promise<number> 
     await waitForIdle()
     await db.clearStaging()
     let merged: Awaited<ReturnType<typeof db.mergeStaging>>
+    // 导入期间降低同步级别，减少每批暂存的 fsync；结束后恢复
+    await db.setImportMode(true)
     try {
       await write()
       merged = await db.mergeStaging()
     } catch (error) {
       await db.clearStaging().catch(db.reportStorageError('clear unfinished history import'))
       throw error
+    } finally {
+      await db
+        .setImportMode(false)
+        .catch(db.reportStorageError('restore synchronous mode'))
     }
     sessionAccess.clear()
     set({

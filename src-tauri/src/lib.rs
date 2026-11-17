@@ -59,6 +59,7 @@ pub fn run() {
             db::db_commit_staging,
             db::db_merge_staging,
             db::db_session_versions,
+            db::db_import_mode,
             db::db_search,
             db::ws_list,
             db::ws_read,

@@ -270,8 +270,8 @@ export const addStagingSession = async (session: Session): Promise<void> => {
 }
 
 /**
- * 批量暂存：按序列化后的字节数切批（每批不超过约 400K 字符），
- * 既避免逐条 IPC 往返，也避免移动端一次传输过大。
+ * 批量暂存：按序列化后的字节数切批。Android 的 WebView IPC 每次调用都有固定开销，
+ * 批太小会让 15k 级别的导入退化成逐条往返，这里放到 2M 字符。
  */
 export const addStagingSessions = async (sessions: Session[]): Promise<void> => {
   const saves = sessions.map((session) => ({
@@ -283,7 +283,7 @@ export const addStagingSessions = async (sessions: Session[]): Promise<void> => 
     summary: JSON.stringify(summaryOf(session)),
     files: [],
   }))
-  const BATCH_CHARS = 400 * 1024
+  const BATCH_CHARS = 2 * 1024 * 1024
   let batch: typeof saves = []
   let size = 0
   const flush = async () => {
@@ -325,6 +325,10 @@ export const loadSessionVersions = async (): Promise<Map<string, number>> => {
   const rows = await invoke<{ id: string; updatedAt: number }[]>('db_session_versions')
   return new Map(rows.map((row) => [row.id, row.updatedAt]))
 }
+
+/** 导入期间把 synchronous 降到 NORMAL，减少每批暂存的 fsync；中断后重导即可 */
+export const setImportMode = (active: boolean) =>
+  invoke<null>('db_import_mode', { active })
 
 export type MergeResult = {
   /** 实际写入的会话数：新增的，以及覆盖了更旧本地版本的部分 */

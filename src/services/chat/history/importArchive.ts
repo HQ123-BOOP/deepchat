@@ -197,8 +197,8 @@ export const importArchive = async (
     // 移动端 IPC 对单次 payload 很敏感：会话每批 16 条；
     // 图片按累计 3MB 或 8 张切批，小图少往返、大图不超限。
     const SESSION_BATCH = 32
-    const FILE_BATCH = 8
-    const FILE_BATCH_BYTES = 3 * 1024 * 1024
+    const FILE_BATCH = 12
+    const FILE_BATCH_BYTES = 6 * 1024 * 1024
     let fileBytes = 0
     let kept = 0
 

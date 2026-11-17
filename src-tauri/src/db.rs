@@ -701,6 +701,14 @@ pub fn db_add_staging_sessions(db: State<'_, Db>, saves: Vec<SessionSave>) -> Re
     tx.commit().map_err(|e| e.to_string())
 }
 
+/// 导入期间把同步级别降到 NORMAL：暂存数据丢了重导即可，换来每批写入不再 fsync
+#[tauri::command]
+pub fn db_import_mode(db: State<'_, Db>, active: bool) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.pragma_update(None, "synchronous", if active { "NORMAL" } else { "FULL" })
+        .map_err(|e| e.to_string())
+}
+
 /// 批量暂存导入的附件
 #[tauri::command]
 pub fn db_save_staging_files(db: State<'_, Db>, files: Vec<DbFile>) -> Result<(), String> {
