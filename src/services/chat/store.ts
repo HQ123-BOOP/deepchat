@@ -810,6 +810,40 @@ export const retryUpload = (sessionId: string, messageId: string) => {
 
 type Request = { history: Message[]; question: UserMessage }
 
+const INLINE_IMAGE_MIME = /^image\/(jpeg|png|gif|webp)$/i
+
+/** 有些 Android 选择器不给 MIME，按文件头兜底识别，避免图片被当成文件跳过 */
+const sniffImageMime = async (blob: Blob): Promise<string> => {
+  const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer())
+  const starts = (...bytes: number[]) => bytes.every((byte, index) => head[index] === byte)
+  if (starts(0xff, 0xd8, 0xff)) {
+    return 'image/jpeg'
+  }
+  if (starts(0x89, 0x50, 0x4e, 0x47)) {
+    return 'image/png'
+  }
+  if (starts(0x47, 0x49, 0x46, 0x38)) {
+    return 'image/gif'
+  }
+  if (
+    starts(0x52, 0x49, 0x46, 0x46) &&
+    String.fromCharCode(...head.slice(8, 12)) === 'WEBP'
+  ) {
+    return 'image/webp'
+  }
+  return ''
+}
+
+const resolveImageMime = async (file: FileAttachment, blob: Blob): Promise<string> => {
+  if (INLINE_IMAGE_MIME.test(file.mimeType)) {
+    return file.mimeType
+  }
+  if (INLINE_IMAGE_MIME.test(blob.type)) {
+    return blob.type
+  }
+  return sniffImageMime(blob)
+}
+
 /** 把本地 Blob 转成不含 data: 前缀的 base64，供标准 Chat API 的 image_url 块使用 */
 const blobToBase64 = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -831,7 +865,9 @@ type PreparedAttachments = {
  */
 const prepareAttachments = async (
   files: FileAttachment[],
-  signal: AbortSignal
+  signal: AbortSignal,
+  /** 尚未落库的附件原件：发送后立刻请求时，DB 写入可能还没完成 */
+  pending: Map<string, Blob>
 ): Promise<PreparedAttachments> => {
   const images: ProviderImage[] = []
   const refs: AttachmentRef[] = []
@@ -842,12 +878,12 @@ const prepareAttachments = async (
     if (!file.isImage || file.size > MAX_INLINE_IMAGE_BYTES) {
       continue
     }
-    const blob = await db.loadFile(file.id)
+    const blob = pending.get(file.id) ?? (await db.loadFile(file.id))
     if (!blob) {
       continue
     }
-    const mimeType = file.mimeType || blob.type
-    if (!/^image\/(jpeg|png|gif|webp)$/i.test(mimeType)) {
+    const mimeType = await resolveImageMime(file, blob)
+    if (!mimeType) {
       continue
     }
     signal.throwIfAborted()
@@ -875,9 +911,14 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
   try {
     const settings = useSettings.getState()
     const provider = createConfiguredPiProvider()
+    // 刚发送的附件可能还在写库，先从待落盘缓存取原件，避免首轮图片丢失
+    const pendingBlobs = new Map(
+      (pendingFiles.get(sessionId) ?? []).map((file) => [file.id, file.blob])
+    )
     const { images, refs, fileNames } = await prepareAttachments(
       request.question.files,
-      controller.signal
+      controller.signal,
+      pendingBlobs
     )
     // 视觉模型直接理解图片，纯图片时不给 OCR；只要有文档，或模型读不了图片，就需要解析
     const acceptsImages = modelAcceptsImages(
@@ -917,8 +958,8 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
           if (!blob) {
             return undefined
           }
-          const mimeType = file.mimeType || blob.type
-          if (!/^image\/(jpeg|png|gif|webp)$/i.test(mimeType)) {
+          const mimeType = await resolveImageMime(file, blob)
+          if (!mimeType) {
             return undefined
           }
           return { data: await blobToBase64(blob), mimeType }
