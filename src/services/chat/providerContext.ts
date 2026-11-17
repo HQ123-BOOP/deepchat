@@ -15,7 +15,6 @@ import type {
   ProviderMessage,
   ToolSchema,
 } from '../providers/types.js'
-import { getReplyText } from './reply.js'
 import type {
   AssistantMessage,
   Message,
@@ -110,6 +109,12 @@ const SUMMARY_INSTRUCTION = [
   '- [待办、待确认的问题]',
 ].join('\n')
 
+/** 只统计会回传给模型的正文；模板提示（错误、拒绝）只给用户看 */
+const sendableText = (reply: AssistantMessage): string =>
+  reply.blocks
+    .map((block) => (block.type === 'text' && !block.isTemplate ? block.text : ''))
+    .join('')
+
 /**
  * 一条 assistant 回复是否有可回传的内容。
  *
@@ -122,7 +127,7 @@ const SUMMARY_INSTRUCTION = [
  * 空消息。
  */
 const hasSendableContent = (reply: AssistantMessage): boolean =>
-  getReplyText(reply) !== '' ||
+  sendableText(reply) !== '' ||
   (reply.toolTrace?.length ?? 0) > 0 ||
   reply.blocks.some(
     (block) =>
@@ -134,12 +139,19 @@ const hasSendableContent = (reply: AssistantMessage): boolean =>
       block.type === 'attachment_parse'
   )
 
-/** 历史里的可用轮次：提问 + 有可回传内容的回答 */
+/**
+ * 历史里的可用轮次：提问 + 有可回传内容的回答。
+ * 失败与拒绝的轮次也保留提问和已执行的工具步骤，只是提示文案本身不进入上下文。
+ */
 const usableRounds = (history: Message[]): [UserMessage, AssistantMessage][] => {
   const rounds: [UserMessage, AssistantMessage][] = []
   for (let i = 0; i + 1 < history.length; i++) {
     const [user, reply] = [history[i], history[i + 1]]
-    if (user.role === 'user' && reply.role === 'assistant' && hasSendableContent(reply)) {
+    if (
+      user.role === 'user' &&
+      reply.role === 'assistant' &&
+      (reply.status === 'error' || reply.stopReason === 'refusal' || hasSendableContent(reply))
+    ) {
       rounds.push([user, reply])
       i++
     }
@@ -181,9 +193,11 @@ const toolBlocksToText = (reply: AssistantMessage): string => {
   return lines.length ? `【上一轮检索到的资料】\n${lines.join('\n')}`.slice(0, MAX_EVIDENCE_CHARS) : ''
 }
 
-/** 旧消息没有轨迹时：正文与思考按块拼接，保留块之间的段落分隔 */
+/** 旧消息没有轨迹时：正文与思考按块拼接，保留块之间的段落分隔；模板提示不回传 */
 const legacySegment = (reply: AssistantMessage) => {
-  const texts = reply.blocks.filter((block): block is TextPart => block.type === 'text')
+  const texts = reply.blocks.filter(
+    (block): block is TextPart => block.type === 'text' && !block.isTemplate
+  )
   const thinking = reply.blocks.filter(
     (block): block is ThinkingPart => block.type === 'thinking' && block.thinking.trim() !== ''
   )
@@ -199,7 +213,9 @@ const legacySegment = (reply: AssistantMessage) => {
  * 正文与思考各有一个游标，同一步里交叉出现的块也能按流式顺序取回。
  */
 const createReader = (blocks: ReplyBlock[]) => {
-  const texts = blocks.filter((block): block is TextPart => block.type === 'text')
+  const texts = blocks.filter(
+    (block): block is TextPart => block.type === 'text' && !block.isTemplate
+  )
   const thinking = blocks.filter((block): block is ThinkingPart => block.type === 'thinking')
   let textIndex = 0
   let textOffset = 0
