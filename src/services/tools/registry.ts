@@ -56,10 +56,10 @@ export const WEB_TOOL_SCHEMAS: ToolSchema[] = [
 ]
 
 /** OCR 一次最多回给模型的字符数；超出部分由 read 分段续读 */
-export const OCR_PREVIEW_CHARS = 50_000
-/** read 单次默认与上限，对齐 DSH 的 read 窗口做法 */
-export const READ_DEFAULT_CHARS = 50_000
-export const READ_MAX_CHARS = 50_000
+export const OCR_PREVIEW_CHARS = 8192
+/** read 单次默认与上限，与工具输出总上限保持一致，续读提示始终准确 */
+export const READ_DEFAULT_CHARS = 8192
+export const READ_MAX_CHARS = 8192
 
 /** 本轮有附件时才声明：解析结果落到应用内部，模型按 file_id 读取 */
 export const OCR_TOOL_SCHEMA: ToolSchema = {
@@ -135,7 +135,7 @@ export type ToolSource = {
 }
 
 export type ToolRunResult = {
-  /** 回填给模型的文本（会进入上下文，按需裁剪） */
+  /** 回填给模型的文本；产生时按上限截断，回放与实时请求一致 */
   content: string
   /** 供 UI 渲染的来源 */
   sources: ToolSource[]
@@ -187,6 +187,41 @@ export const classifyToolFailure = (tool: string, error: unknown): ToolFailure =
     'unavailable',
     error instanceof Error ? error.message : String(error)
   )
+}
+
+/**
+ * 回给模型的单次工具输出上限。对齐 harness：工具在产生输出时就截断并附一句说明，
+ * 落库的轨迹因此与实时请求完全一致，回放时无需再改内容。
+ */
+const TOOL_OUTPUT_MAX_CHARS = 8192
+/** 对齐 harness 的 fetch 截断说明 */
+const TRUNCATION_FOOTER = '\n\n(Content truncated. Fetch a more specific URL or section for the full text.)'
+
+/** 前缀截断并附说明，说明本身计入上限 */
+const capOutput = (text: string): string =>
+  text.length <= TOOL_OUTPUT_MAX_CHARS
+    ? text
+    : `${text.slice(0, TOOL_OUTPUT_MAX_CHARS - TRUNCATION_FOOTER.length)}${TRUNCATION_FOOTER}`
+
+/** 搜索结果按整条保留：放不下时丢弃后面的条目并说明，避免从条目中间截断 */
+const formatSearchContent = (query: string, entries: string[]): string => {
+  const header = `搜索「${query}」的结果：`
+  const join = (items: string[]) => `${header}\n\n${items.join('\n\n')}`
+  const kept: string[] = []
+  for (const entry of entries) {
+    if (join([...kept, entry]).length > TOOL_OUTPUT_MAX_CHARS) {
+      break
+    }
+    kept.push(entry)
+  }
+  if (kept.length === entries.length) {
+    return join(kept)
+  }
+  const notice = `(Showing the first ${kept.length} sources. Refine the query for more.)`
+  while (kept.length > 0 && join([...kept, notice]).length > TOOL_OUTPUT_MAX_CHARS) {
+    kept.pop()
+  }
+  return join([...kept, notice])
 }
 
 const trim = (text: string, limit: number) =>
@@ -251,7 +286,7 @@ export const runTool = async (
         `[${index + 1}] ${result.title}\n${result.url}\n${trim(result.summary || result.snippet, 800)}`
     )
     return {
-      content: `搜索「${query}」的结果：\n\n${lines.join('\n\n')}`,
+      content: formatSearchContent(query, lines),
       sources: results.map(toSource),
     }
   }
@@ -262,7 +297,7 @@ export const runTool = async (
     }
     const page = await fetchPage(ctx.apiKey, url, ctx.signal)
     return {
-      content: `网页「${page.title || url}」的正文：\n\n${trim(page.content, 20000)}`,
+      content: capOutput(`网页「${page.title || url}」的正文：\n\n${page.content}`),
       sources: [{ title: page.title || url, url, snippet: trim(page.content, 160) }],
     }
   }
