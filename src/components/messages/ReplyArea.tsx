@@ -8,7 +8,6 @@ import {
   IconChevronRightOutline14,
   IconCheckedOutline14,
   IconCloseFill14,
-  IconDownloadOutline16,
   IconEditOutline16,
   IconFileOutline20,
   IconLinkOutline16,
@@ -21,7 +20,7 @@ import {
   IconWarningOutline16,
 } from '../base/icons.js'
 import { loadFileText, type StoredFileText } from '../../services/chat/db.js'
-import { readWorkspaceFile, saveWorkspaceFile } from '../../services/workspace.js'
+import { readWorkspaceFile } from '../../services/workspace.js'
 import { showToast } from '../base/toastState.js'
 import type { AssistantMessage } from '../../services/chat/types.js'
 import {
@@ -42,7 +41,6 @@ import {
   type WorkspaceStep,
 } from '../../services/chat/view.js'
 import { Tooltip } from '../base/Tooltip.js'
-import { IconButton } from '../base/IconButton.js'
 import { FileTextViewer } from '../files/FileTextViewer.js'
 import { WorkspaceFileViewer } from '../files/WorkspaceFileViewer.js'
 import { Markdown } from '../markdown/Markdown.js'
@@ -220,6 +218,9 @@ const toolErrorText = (step: ToolErrorStep, t: Translate): string => {
   if (step.tool === 'edit') {
     return t(step.code === 'invalid_arguments' ? 'toolEditInvalid' : 'toolEditFailed')
   }
+  if (step.tool === 'present') {
+    return t(step.code === 'invalid_arguments' ? 'toolPresentInvalid' : 'toolPresentFailed')
+  }
   return t('toolSearchFail')
 }
 
@@ -371,7 +372,7 @@ const AttachmentRow = ({ step, isLast }: { step: AttachmentStep; isLast: boolean
   )
 }
 
-/** write / edit 产物：一行文件记录，点开预览，可保存到设备 */
+/** write / edit 产物：一行文件记录，执行中显示正文大小，完成后显示增删行数 */
 const WorkspaceRow = ({
   step,
   sessionId,
@@ -384,12 +385,15 @@ const WorkspaceRow = ({
   const t = useTranslate()
   const [text, setText] = useState<string | null>(null)
   const action = step.action ?? (step.operation === 'created' ? 'create' : 'update')
+  const running = step.status === 'running'
   const actionLabel = t(
-    action === 'create'
-      ? 'fileActionCreate'
-      : action === 'edit'
-        ? 'fileActionEdit'
-        : 'fileActionUpdate'
+    action === 'write'
+      ? 'fileActionWrite'
+      : action === 'create'
+        ? 'fileActionCreate'
+        : action === 'edit'
+          ? 'fileActionEdit'
+          : 'fileActionUpdate'
   )
   const open = async () => {
     const next = await readWorkspaceFile(sessionId, step.path)
@@ -399,18 +403,13 @@ const WorkspaceRow = ({
     }
     setText(next)
   }
-  const save = async () => {
-    if (!(await saveWorkspaceFile(sessionId, step.path))) {
-      showToast({ key: 'workspaceSaveFailed' })
-    }
-  }
   return (
     <>
       <ToolRow
         icon={
           action === 'create' ? (
             <IconPlusOutline16 />
-          ) : action === 'update' || action === 'edit' ? (
+          ) : action === 'update' || action === 'edit' || action === 'write' ? (
             <IconEditOutline16 />
           ) : (
             <IconFileOutline20 />
@@ -427,17 +426,13 @@ const WorkspaceRow = ({
             <span className={styles.diffAdd}>+{step.added}</span>
             <span className={styles.diffRemove}>-{step.removed ?? 0}</span>
           </span>
+        ) : running && step.bytes !== undefined ? (
+          <span className={styles.attachmentMeta}>{Math.ceil(step.bytes / 1024)}KB</span>
         ) : step.chars !== undefined ? (
           <span className={styles.attachmentMeta}>
             {t('workspaceChars', { count: step.chars.toLocaleString() })}
           </span>
         ) : null}
-        <IconButton
-          icon={<IconDownloadOutline16 />}
-          tooltip={t('workspaceSave')}
-          tooltipPlacement="bottom"
-          onClick={save}
-        />
       </ToolRow>
       {text !== null ? (
         <WorkspaceFileViewer name={step.path} text={text} onClose={() => setText(null)} />

@@ -63,6 +63,7 @@ pub fn run() {
             db::db_search,
             db::ws_list,
             db::ws_read,
+            db::ws_export,
             db::ws_write,
             db::ws_edit
         ])

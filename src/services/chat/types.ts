@@ -91,12 +91,30 @@ export type WorkspaceFilePart = {
   type: 'workspace_file'
   id: string
   path: string
-  action?: 'create' | 'update' | 'edit'
+  /** write 执行中还不知道是新建还是覆盖，用 write 表示进行中的写入 */
+  action?: 'write' | 'create' | 'update' | 'edit'
+  /** running：参数已到齐、工具正在执行；done：已经落盘并带上增删行数 */
+  status?: 'running' | 'done'
+  /** 准备阶段的正文大小（UTF-8 字节），结算后不再使用 */
+  bytes?: number
   added?: number
   removed?: number
   /** 早期消息的字段，保留用于兼容 */
   operation?: 'created' | 'updated'
   chars?: number
+}
+
+/** 模型声明交付的文件：只记录路径与说明，内容仍留在工作区 */
+export type PresentedFile = {
+  path: string
+  description?: string
+}
+
+/** present 的交付记录：在最终回答下方渲染文件卡片 */
+export type PresentedFilesPart = {
+  type: 'presented_files'
+  id: string
+  files: PresentedFile[]
 }
 
 /** read 的窗口记录：附件或工作区文件读取了哪些行 */
@@ -119,6 +137,7 @@ export type ReplyBlock =
   | AttachmentParsePart
   | WorkspaceFilePart
   | FileReadPart
+  | PresentedFilesPart
 
 /** 一次本地工具调用回给模型的结果；content 是当时完整的工具输出 */
 export type ToolTraceResult = {

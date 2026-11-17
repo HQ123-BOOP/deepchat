@@ -55,10 +55,18 @@ export const editWorkspaceFile = (
 ) => invoke<WorkspaceEditResult>('ws_edit', { sessionId, path, oldString, newString, replaceAll })
 
 /**
- * 把工作区文件交给系统：能分享附件时走分享面板（Android 可存到「文件」），
- * 否则退化为浏览器下载。用户取消分享不算失败。
+ * 保存工作区文件：优先由原生写到系统下载目录（WebView 的 blob 下载不可靠），
+ * 失败时退回分享面板或浏览器下载。
  */
 export const saveWorkspaceFile = async (sessionId: string, path: string): Promise<boolean> => {
+  if (getInternals()) {
+    try {
+      await invoke<string>('ws_export', { sessionId, path })
+      return true
+    } catch {
+      // 原生导出失败时继续尝试下面的分享与下载
+    }
+  }
   const text = await readWorkspaceFile(sessionId, path)
   if (text === null) {
     return false
@@ -84,7 +92,10 @@ export const saveWorkspaceFile = async (sessionId: string, path: string): Promis
   link.href = url
   link.download = name
   link.rel = 'noreferrer'
+  // WebView 只对挂到文档里的链接触发下载
+  document.body.appendChild(link)
   link.click()
+  link.remove()
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
   return true
 }

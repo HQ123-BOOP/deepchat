@@ -84,12 +84,14 @@ export type AttachmentStep = {
   chars: number
 }
 
-/** 工作区文件：write / edit 的产物，一行记录，可点开预览或保存到本地 */
+/** 工作区文件：write / edit 的产物，一行记录；执行中显示正文大小，完成后显示 diff */
 export type WorkspaceStep = {
   type: 'workspace'
   key: string
   path: string
-  action?: 'create' | 'update' | 'edit'
+  action?: 'write' | 'create' | 'update' | 'edit'
+  status?: 'running' | 'done'
+  bytes?: number
   added?: number
   removed?: number
   /** 早期消息的字段，保留兼容 */
@@ -332,11 +334,18 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
         key: block.id,
         path: block.path,
         action: block.action,
+        status: block.status,
+        bytes: block.bytes,
         added: block.added,
         removed: block.removed,
         operation: block.operation,
         chars: block.chars,
       })
+      return
+    }
+    // 交付文件在最终回答下方单独显示，不进入工具时间线
+    if (block.type === 'presented_files') {
+      flushPreamble()
       return
     }
     if (block.type === 'file_read') {

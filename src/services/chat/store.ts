@@ -5,6 +5,7 @@ import type { ProviderImage } from '../providers/types.js'
 import {
   EDIT_TOOL_SCHEMA,
   OCR_TOOL_SCHEMA,
+  PRESENT_TOOL_SCHEMA,
   READ_TOOL_SCHEMA,
   WEB_TOOL_SCHEMAS,
   WRITE_TOOL_SCHEMA,
@@ -941,6 +942,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       READ_TOOL_SCHEMA,
       WRITE_TOOL_SCHEMA,
       EDIT_TOOL_SCHEMA,
+      PRESENT_TOOL_SCHEMA,
     ]
     // 工具只会调 DeepSeek 服务：优先独立配置的 Key，其次旧版 Key，DeepSeek 模型可复用模型 Key
     const serviceApiKey =

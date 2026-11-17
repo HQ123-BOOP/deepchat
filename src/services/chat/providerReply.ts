@@ -52,6 +52,64 @@ export type ProviderReplyOptions = {
 
 const toolUseId = (callId: string) => `toolu_local_${callId}`
 
+/** 参数流式阶段的临时块 id；工具真正开始时替换成正式 id 的块 */
+const prepareBlockId = (index: number) => `prepare-${index}`
+
+/**
+ * 从尚未闭合的工具参数 JSON 中取出某个字符串字段已到达的部分。
+ * 只在准备阶段估算文件名与正文大小，不要求完整或合法的 JSON。
+ */
+const partialJsonString = (raw: string, key: string): string | undefined => {
+  const marker = `"${key}"`
+  const at = raw.indexOf(marker)
+  if (at < 0) {
+    return undefined
+  }
+  let cursor = at + marker.length
+  while (cursor < raw.length && /\s/.test(raw[cursor])) {
+    cursor += 1
+  }
+  if (raw[cursor] !== ':') {
+    return undefined
+  }
+  cursor += 1
+  while (cursor < raw.length && /\s/.test(raw[cursor])) {
+    cursor += 1
+  }
+  if (raw[cursor] !== '"') {
+    return undefined
+  }
+  cursor += 1
+  let out = ''
+  while (cursor < raw.length) {
+    const char = raw[cursor]
+    if (char === '"') {
+      return out
+    }
+    if (char !== '\\') {
+      out += char
+      cursor += 1
+      continue
+    }
+    const next = raw[cursor + 1]
+    if (next === undefined) {
+      return out
+    }
+    if (next === 'u') {
+      const hex = raw.slice(cursor + 2, cursor + 6)
+      if (hex.length < 4) {
+        return out
+      }
+      out += String.fromCharCode(Number.parseInt(hex, 16))
+      cursor += 6
+      continue
+    }
+    out += next === 'n' ? '\n' : next === 't' ? '\t' : next === 'r' ? '\r' : next
+    cursor += 2
+  }
+  return out
+}
+
 /**
  * 把 trace 消息压成步骤记录：正文和思考已经在 blocks 里，只保留字符数与签名，
  * 避免同一段内容在会话里存两份。
@@ -94,6 +152,28 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
   let reply: AssistantMessage = options.reply
   const pushBlock = (block: ReplyBlock) => {
     reply = { ...reply, blocks: [...reply.blocks, block] }
+  }
+  /** 参数流式阶段的写文件行：index → 工具名、原始 JSON、是否已经显示 */
+  const preparing = new Map<number, { name: string; raw: string; pushed: boolean }>()
+  /** 请求失败时清掉还没结算的临时行 */
+  const clearPrepared = () => {
+    reply = {
+      ...reply,
+      blocks: reply.blocks.filter(
+        (block) => !('id' in block) || !block.id.startsWith('prepare-')
+      ),
+    }
+  }
+  /** 用同一 id 的新块替换旧块（解析中 → 完成）；没有旧块时追加 */
+  const replaceBlock = (id: string, next: ReplyBlock) => {
+    const index = reply.blocks.findIndex((block) => 'id' in block && block.id === id)
+    reply = {
+      ...reply,
+      blocks:
+        index >= 0
+          ? [...reply.blocks.slice(0, index), next, ...reply.blocks.slice(index + 1)]
+          : [...reply.blocks, next],
+    }
   }
   /** 思考阶段结束时打点，避免用时一直增长；重复调用无副作用 */
   const closeThinking = (at: number) => {
@@ -172,6 +252,41 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
         appendToLast('thinking', event.text)
       } else if (event.type === 'reasoning_signature') {
         attachReasoningSignature(event.signature)
+      } else if (event.type === 'tool_prepare') {
+        // 只有写文件需要提前显示；其他工具等执行时再出现
+        if (event.name === 'write' || event.name === 'edit') {
+          preparing.set(event.index, { name: event.name, raw: '', pushed: false })
+        }
+      } else if (event.type === 'tool_prepare_delta') {
+        const prepared = preparing.get(event.index)
+        if (prepared) {
+          prepared.raw += event.delta
+          const path = partialJsonString(prepared.raw, 'file_path')?.trim()
+          if (path) {
+            const content =
+              prepared.name === 'write'
+                ? partialJsonString(prepared.raw, 'content') ?? ''
+                : [partialJsonString(prepared.raw, 'old_string'), partialJsonString(prepared.raw, 'new_string')]
+                    .filter((value): value is string => value !== undefined)
+                    .join('')
+            const blockId = prepareBlockId(event.index)
+            const block: ReplyBlock = {
+              type: 'workspace_file',
+              id: blockId,
+              path,
+              action: prepared.name === 'write' ? 'write' : 'edit',
+              status: 'running',
+              bytes: new TextEncoder().encode(content).length,
+            }
+            if (prepared.pushed) {
+              replaceBlock(blockId, block)
+            } else {
+              pushBlock(block)
+              prepared.pushed = true
+            }
+            options.onChange(reply)
+          }
+        }
       } else if (event.type === 'trace') {
         // function call 与结果按步骤落库；正文和思考不重复存，回放时按长度从 blocks 取回
         for (const message of event.messages) {
@@ -207,6 +322,49 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
         }
         // 续读只回填给模型，不重复展示
         if (event.call.name === 'read') {
+          continue
+        }
+        // write / edit：参数已到齐、工具还在执行，先显示文件行与正文大小，结算后再补 diff
+        if (event.call.name === 'write' || event.call.name === 'edit') {
+          // 参数流式阶段已经有同一调用的临时行，先移除再换成正式 id 的块
+          if (event.index !== undefined) {
+            const preparedId = prepareBlockId(event.index)
+            reply = {
+              ...reply,
+              blocks: reply.blocks.filter(
+                (block) => !('id' in block) || block.id !== preparedId
+              ),
+            }
+            preparing.delete(event.index)
+          }
+          let args: Record<string, unknown> = {}
+          try {
+            args = event.call.arguments
+              ? (JSON.parse(event.call.arguments) as Record<string, unknown>)
+              : {}
+          } catch {
+            args = {}
+          }
+          const path = typeof args.file_path === 'string' ? args.file_path.trim() : ''
+          if (path) {
+            const content =
+              event.call.name === 'write'
+                ? typeof args.content === 'string'
+                  ? args.content
+                  : ''
+                : [args.old_string, args.new_string]
+                    .filter((value): value is string => typeof value === 'string')
+                    .join('')
+            pushBlock({
+              type: 'workspace_file',
+              id: toolUseId(event.call.id),
+              path,
+              action: event.call.name === 'write' ? 'write' : 'edit',
+              status: 'running',
+              bytes: new TextEncoder().encode(content).length,
+            })
+            options.onChange(reply)
+          }
           continue
         }
         // 未知工具不冒充搜索，等失败结果里再显示「未知工具」
@@ -267,15 +425,27 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
           options.onChange(reply)
           continue
         }
-        // write / edit 的产物：保留一行可点开的文件记录
+        // write / edit 的产物：把执行中的行替换成带 diff 的完成记录
         if (event.workspace) {
-          pushBlock({
+          const blockId = toolUseId(event.call.id)
+          replaceBlock(blockId, {
             type: 'workspace_file',
-            id: toolUseId(event.call.id),
+            id: blockId,
             path: event.workspace.path,
             action: event.workspace.action,
+            status: 'done',
             added: event.workspace.added,
             removed: event.workspace.removed,
+          })
+          options.onChange(reply)
+          continue
+        }
+        // present 的交付文件：在最终回答下方显示卡片
+        if (event.presented) {
+          pushBlock({
+            type: 'presented_files',
+            id: toolUseId(event.call.id),
+            files: event.presented,
           })
           options.onChange(reply)
           continue
@@ -294,7 +464,7 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
         if (event.call.name === 'ocr_file') {
           if (event.attachment) {
             const blockId = toolUseId(event.call.id)
-            const next: ReplyBlock = {
+            replaceBlock(blockId, {
               type: 'attachment_parse',
               id: blockId,
               fileId: event.attachment.id,
@@ -302,17 +472,7 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
               status: 'done',
               pages: event.attachment.pages,
               chars: event.attachment.chars,
-            }
-            const index = reply.blocks.findIndex(
-              (block) => 'id' in block && block.id === blockId
-            )
-            reply = {
-              ...reply,
-              blocks:
-                index >= 0
-                  ? [...reply.blocks.slice(0, index), next, ...reply.blocks.slice(index + 1)]
-                  : [...reply.blocks, next],
-            }
+            })
             options.onChange(reply)
           }
           continue
@@ -357,6 +517,7 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
         options.onChange(reply)
       } else if (event.type === 'done' && event.stopReason === 'error') {
         // 请求或流出错：保留已收到的块，但必须把错误抛给界面，不能静默结束
+        clearPrepared()
         reply = settleReply(reply, 'error', Date.now(), {
           kind: 'stream',
           message: event.error ?? 'The model request failed',
@@ -368,6 +529,7 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
     // 收尾时补齐仍未结束的思考块，避免用时停在最后一次 tick
     reply = settleReply({ ...reply, stopReason: 'end_turn' }, 'done', Date.now())
   } catch (error) {
+    clearPrepared()
     reply = settleReply(reply, 'error', Date.now(), {
       kind: 'stream',
       message: error instanceof Error ? error.message : String(error),

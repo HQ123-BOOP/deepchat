@@ -377,9 +377,20 @@ export const createPiAiProvider = (config: PiAiConfig): ChatProvider => ({
           }
           break
         }
+        case 'toolcall_start': {
+          const block = event.partial.content[event.contentIndex]
+          if (block?.type === 'toolCall') {
+            yield { type: 'tool_prepare', index: event.contentIndex, name: block.name }
+          }
+          break
+        }
+        case 'toolcall_delta':
+          yield { type: 'tool_prepare_delta', index: event.contentIndex, delta: event.delta }
+          break
         case 'toolcall_end':
           yield {
             type: 'tool_call',
+            index: event.contentIndex,
             call: {
               id: event.toolCall.id,
               name: event.toolCall.name,

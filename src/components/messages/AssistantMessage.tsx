@@ -5,7 +5,7 @@ import { IconRefreshOutline16 } from '../base/icons.js'
 import { describeReply } from '../../services/chat/describe.js'
 import { regenerateReply } from '../../services/chat/store.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
-import type { AssistantMessage as AssistantMessageType } from '../../services/chat/types.js'
+import type { AssistantMessage as AssistantMessageType, PresentedFile } from '../../services/chat/types.js'
 import { openSettings } from '../settings/settingsDialogState.js'
 import { IconButton } from '../base/IconButton.js'
 import { Markdown } from '../markdown/Markdown.js'
@@ -13,6 +13,7 @@ import { SiteThumbnails } from '../search/SiteLogo.js'
 import { toggleSearchPanel, useSearchPanel } from '../search/searchPanelState.js'
 import { ReadAloudButton } from './ReadAloudButton.js'
 import { CopyButton } from './CopyButton.js'
+import { PresentedFiles } from './PresentedFiles.js'
 import { ReplyArea } from './ReplyArea.js'
 import { useReplyView } from './useReplyView.js'
 import {
@@ -53,6 +54,21 @@ export const AssistantMessage = memo(function AssistantMessage({
     .join('\n\n')
   const copyText = responseText || notice?.text
   const waiting = streaming && view.steps.length === 0 && !view.answer && !message.thinking
+  // 交付文件按路径去重，重复声明时沿用最后一次的描述
+  const presented = message.blocks.reduce<PresentedFile[]>((files, block) => {
+    if (block.type !== 'presented_files') {
+      return files
+    }
+    for (const file of block.files) {
+      const index = files.findIndex((item) => item.path === file.path)
+      if (index >= 0) {
+        files[index] = file
+      } else {
+        files.push(file)
+      }
+    }
+    return files
+  }, [])
   const summaryEntry = `${message.id}-summary`
   return (
     <div className={styles.message}>
@@ -74,6 +90,9 @@ export const AssistantMessage = memo(function AssistantMessage({
           disableLink={false}
           sources={view.sources}
         />
+      ) : null}
+      {presented.length > 0 ? (
+        <PresentedFiles sessionId={sessionId} files={presented} />
       ) : null}
       {waiting ? (
         <div className={styles.waiting}>

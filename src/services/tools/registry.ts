@@ -15,6 +15,7 @@ import {
 } from './deepseekTools.js'
 import type { JsonSchema, ToolSchema } from '../providers/types.js'
 import { editWorkspaceFile, readWorkspaceFile, writeWorkspaceFile } from '../workspace.js'
+import type { PresentedFile } from '../chat/types.js'
 export type ToolName = 'web_search' | 'read_url' | 'ocr_file' | 'read'
 
 /** 联网开关打开时才声明 */
@@ -120,7 +121,9 @@ export const READ_TOOL_SCHEMA: ToolSchema = {
 /** 模型可用的文件工具：只写应用内工作区，不接触系统文件 */
 export const WRITE_TOOL_SCHEMA: ToolSchema = {
   name: 'write',
-  description: 'Create or fully replace a UTF-8 text file in the app workspace.',
+  description:
+    'Create or fully replace a UTF-8 text file in the app workspace. ' +
+    'Once the file is final, call present to show it to the user.',
   parameters: {
     type: 'object',
     properties: {
@@ -141,7 +144,9 @@ export const WRITE_TOOL_SCHEMA: ToolSchema = {
 
 export const EDIT_TOOL_SCHEMA: ToolSchema = {
   name: 'edit',
-  description: 'Edit an existing UTF-8 text file in the app workspace by replacing literal text.',
+  description:
+    'Edit an existing UTF-8 text file in the app workspace by replacing literal text. ' +
+    'Once the file is final, call present to show it to the user.',
   parameters: {
     type: 'object',
     properties: {
@@ -166,6 +171,42 @@ export const EDIT_TOOL_SCHEMA: ToolSchema = {
   } satisfies JsonSchema,
 }
 
+/** 展示文件：把已完成的文件声明为交付物，界面在最终回答下方显示卡片 */
+export const PRESENT_TOOL_SCHEMA: ToolSchema = {
+  name: 'present',
+  description:
+    'Declare existing workspace files as final deliverables for the user. ' +
+    'The files are shown below your final response, so call it once the files are final, then continue and write your final answer. ' +
+    'Use it when the user needs a separate file; prefer the final response when that suffices. ' +
+    'The user opens the current files; their contents are not copied.',
+  parameters: {
+    type: 'object',
+    properties: {
+      files: {
+        type: 'array',
+        description: 'Usually the 1-2 most important deliverables; at most 4 per call.',
+        items: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Workspace-relative path of an existing file, e.g. "notes/report.md".',
+            },
+            description: {
+              type: 'string',
+              description: 'Brief description of the file for the user.',
+            },
+          },
+          required: ['path'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['files'],
+    additionalProperties: false,
+  } satisfies JsonSchema,
+}
+
 /** 全量工具集合；实际请求按开关与本轮附件裁剪 */
 export const TOOL_SCHEMAS: ToolSchema[] = [
   ...WEB_TOOL_SCHEMAS,
@@ -173,6 +214,7 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
   READ_TOOL_SCHEMA,
   WRITE_TOOL_SCHEMA,
   EDIT_TOOL_SCHEMA,
+  PRESENT_TOOL_SCHEMA,
 ]
 
 /** 一份落盘的 OCR 结果 */
@@ -217,6 +259,8 @@ export type ToolRunResult = {
     to: number
     total: number
   }
+  /** present 声明的交付文件，供 UI 在回答下方显示卡片 */
+  presented?: PresentedFile[]
 }
 
 /** UI 展示解析结果所需的元数据，不含全文 */
@@ -638,6 +682,33 @@ export const runTool = async (
       }
     } catch (error) {
       throw toWorkspaceFailure(name, error)
+    }
+  }
+  if (name === 'present') {
+    const entries = Array.isArray(args.files) ? args.files : []
+    if (entries.length === 0 || entries.length > 8) {
+      throw new ToolFailure('present', 'invalid_arguments', 'files must contain 1 to 8 entries')
+    }
+    const presented: PresentedFile[] = []
+    for (const entry of entries) {
+      const record =
+        typeof entry === 'object' && entry !== null ? (entry as Record<string, unknown>) : {}
+      const path = typeof record.path === 'string' ? record.path.trim() : ''
+      if (!path) {
+        throw new ToolFailure('present', 'invalid_arguments', 'path must be a non-empty string')
+      }
+      // 只声明工作区里真实存在的文件；内容仍留在工作区，由用户按需打开
+      if ((await readWorkspaceFile(ctx.sessionId, path)) === null) {
+        throw new ToolFailure('present', 'not_found', `file not found: ${path}`)
+      }
+      const description =
+        typeof record.description === 'string' ? record.description.trim() : ''
+      presented.push({ path, ...(description ? { description } : {}) })
+    }
+    return {
+      content: presented.map((file) => `Presented ${file.path}`).join('\n'),
+      sources: [],
+      presented,
     }
   }
   throw new ToolFailure(name, 'unknown_tool', `Unknown tool: ${name}`)

@@ -65,7 +65,11 @@ export type ProviderEvent =
   | { type: 'reasoning'; text: string }
   /** 思考块结束时到达的签名；缺失时该段思考无法在下一轮原样回传 */
   | { type: 'reasoning_signature'; signature: string }
-  | { type: 'tool_call'; call: ToolCall }
+  /** 工具调用参数开始生成；index 用来关联同一调用的后续增量 */
+  | { type: 'tool_prepare'; index: number; name: string }
+  /** 工具调用参数的 JSON 增量；用于在执行前显示文件名与正文大小 */
+  | { type: 'tool_prepare_delta'; index: number; delta: string }
+  | { type: 'tool_call'; call: ToolCall; index?: number }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   | { type: 'done'; stopReason: StopReason; error?: string }
 

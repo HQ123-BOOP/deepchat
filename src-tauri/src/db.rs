@@ -1182,6 +1182,66 @@ pub fn ws_read(
     .map_err(|e| e.to_string())
 }
 
+/// 重名时追加 (1)、(2)…，避免覆盖用户已经下载的文件
+fn unique_download_path(dir: &Path, name: &str) -> PathBuf {
+    let candidate = dir.join(name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let path = Path::new(name);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(name);
+    let extension = path.extension().and_then(|value| value.to_str());
+    for index in 1..1000 {
+        let file = match extension {
+            Some(ext) => format!("{stem} ({index}).{ext}"),
+            None => format!("{stem} ({index})"),
+        };
+        let candidate = dir.join(file);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(name)
+}
+
+/// 把工作区文件写到系统下载目录；返回实际保存路径
+#[tauri::command]
+pub fn ws_export(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    session_id: String,
+    path: String,
+) -> Result<String, String> {
+    let path = workspace_path(&path)?;
+    let content = {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
+            "SELECT content FROM workspace_files WHERE session_id = ?1 AND path = ?2",
+            params![session_id, path],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "file not found".to_string())?
+    };
+    let dir = app
+        .path()
+        .download_dir()
+        .or_else(|_| app.path().document_dir())
+        .map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let name = Path::new(&path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file.txt");
+    let target = unique_download_path(&dir, name);
+    std::fs::write(&target, content).map_err(|e| e.to_string())?;
+    Ok(target.display().to_string())
+}
+
 /// 行级增删统计：先裁掉首尾相同的行，中间部分按新旧行数计入
 fn line_diff_stats(before: &str, after: &str) -> (usize, usize) {
     let old: Vec<&str> = before.lines().collect();

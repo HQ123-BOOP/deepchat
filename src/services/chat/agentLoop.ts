@@ -19,13 +19,17 @@ import type {
   ToolCall,
   ToolSchema,
 } from '../providers/types.js'
+import type { PresentedFile } from './types.js'
 
 export type AgentEvent =
   | { type: 'text'; text: string }
   | { type: 'reasoning'; text: string }
   | { type: 'reasoning_signature'; signature: string }
+  /** 工具调用参数开始生成，供 UI 在执行前先显示文件卡片 */
+  | { type: 'tool_prepare'; index: number; name: string }
+  | { type: 'tool_prepare_delta'; index: number; delta: string }
   /** round = ReAct 循环的第几轮，同一轮内的多个工具调用可合并展示 */
-  | { type: 'tool_start'; call: ToolCall; round: number }
+  | { type: 'tool_start'; call: ToolCall; round: number; index?: number }
   | {
       type: 'tool_result'
       call: ToolCall
@@ -53,6 +57,8 @@ export type AgentEvent =
         to: number
         total: number
       }
+      /** present 声明的交付文件 */
+      presented?: PresentedFile[]
     }
   /**
    * 本轮产生的原始 function call 消息：assistant 工具调用与对应的 tool 结果。
@@ -97,7 +103,7 @@ export async function* runAgent(
 
   // 不设轮次上限：模型继续调用工具就继续驱动，直到它给出正文、报错或被 signal 取消。
   for (let step = 0; ; step++) {
-    const pending: ToolCall[] = []
+    const pending: { call: ToolCall; index?: number }[] = []
     let finish: 'stop' | 'length' | 'tool_calls' | 'error' = 'stop'
     let text = ''
     // 这一轮的思考与签名；必须随 assistant 消息回传，否则工具续轮会丢推理
@@ -124,8 +130,12 @@ export async function* runAgent(
         } else if (event.type === 'reasoning_signature') {
           reasoningSignature = event.signature
           yield { type: 'reasoning_signature', signature: event.signature }
+        } else if (event.type === 'tool_prepare') {
+          yield { type: 'tool_prepare', index: event.index, name: event.name }
+        } else if (event.type === 'tool_prepare_delta') {
+          yield { type: 'tool_prepare_delta', index: event.index, delta: event.delta }
         } else if (event.type === 'tool_call') {
-          pending.push(event.call)
+          pending.push({ call: event.call, index: event.index })
         } else if (event.type === 'done') {
           finish = event.stopReason === 'error' ? 'error' : event.stopReason
           if (event.error) {
@@ -152,14 +162,14 @@ export async function* runAgent(
     const assistant: ProviderMessage = {
       role: 'assistant',
       content: text,
-      toolCalls: pending,
+      toolCalls: pending.map((item) => item.call),
       ...(reasoning ? { reasoning } : {}),
       ...(reasoningSignature ? { reasoningSignature } : {}),
     }
     messages.push(assistant)
     yield { type: 'trace', messages: [assistant] }
-    for (const call of pending) {
-      yield { type: 'tool_start', call, round: step }
+    for (const { call, index } of pending) {
+      yield { type: 'tool_start', call, round: step, index }
       let content: string
       let sources: ToolSource[] = []
       let attachment: AttachmentSummary | undefined
@@ -169,6 +179,7 @@ export async function* runAgent(
       let read:
         | { kind: 'attachment' | 'workspace'; target: string; name: string; from: number; to: number; total: number }
         | undefined
+      let presented: PresentedFile[] | undefined
       try {
         const parsed = call.arguments ? (JSON.parse(call.arguments) as Record<string, unknown>) : {}
         const result = await runTool(call.name, parsed, {
@@ -185,6 +196,7 @@ export async function* runAgent(
         attachment = result.attachment
         workspace = result.workspace
         read = result.read
+        presented = result.presented
         yield {
           type: 'tool_result',
           call,
@@ -194,6 +206,7 @@ export async function* runAgent(
           attachment,
           workspace,
           read,
+          presented,
         }
       } catch (error) {
         const failure = classifyToolFailure(call.name, error)
