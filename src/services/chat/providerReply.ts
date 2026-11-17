@@ -253,15 +253,18 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
       } else if (event.type === 'reasoning_signature') {
         attachReasoningSignature(event.signature)
       } else if (event.type === 'tool_prepare') {
-        // 只有写文件需要提前显示；其他工具等执行时再出现
-        if (event.name === 'write' || event.name === 'edit') {
-          preparing.set(event.index, { name: event.name, raw: '', pushed: false })
-        }
+        preparing.set(event.index, { name: event.name, raw: '', pushed: false })
       } else if (event.type === 'tool_prepare_delta') {
-        const prepared = preparing.get(event.index)
-        if (prepared) {
+        const prepared = preparing.get(event.index) ?? { name: '', raw: '', pushed: false }
+        preparing.set(event.index, prepared)
+        // 工具名可能晚于首个增量才到，补齐后仍按 write/edit 处理
+        if (!prepared.name && event.name) {
+          prepared.name = event.name
+        }
+        if (prepared.name === 'write' || prepared.name === 'edit') {
           prepared.raw += event.delta
-          const path = partialJsonString(prepared.raw, 'file_path')?.trim()
+          // 只在参数开头找路径，避免正文里出现的同名键被误判
+          const path = partialJsonString(prepared.raw.slice(0, 4096), 'file_path')?.trim()
           if (path) {
             const content =
               prepared.name === 'write'
@@ -296,6 +299,17 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
       } else if (event.type === 'tool_start') {
         // 工具调用说明思考阶段已结束
         closeThinking(Date.now())
+        // 参数流式阶段的临时行到此结束，接下来换成正式 id 的块
+        if (event.index !== undefined) {
+          const preparedId = prepareBlockId(event.index)
+          reply = {
+            ...reply,
+            blocks: reply.blocks.filter(
+              (block) => !('id' in block) || block.id !== preparedId
+            ),
+          }
+          preparing.delete(event.index)
+        }
         const round = event.round
         // 附件解析先占一行「解析中」，完成后再补页数与字符数
         if (event.call.name === 'ocr_file') {
@@ -326,17 +340,6 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
         }
         // write / edit：参数已到齐、工具还在执行，先显示文件行与正文大小，结算后再补 diff
         if (event.call.name === 'write' || event.call.name === 'edit') {
-          // 参数流式阶段已经有同一调用的临时行，先移除再换成正式 id 的块
-          if (event.index !== undefined) {
-            const preparedId = prepareBlockId(event.index)
-            reply = {
-              ...reply,
-              blocks: reply.blocks.filter(
-                (block) => !('id' in block) || block.id !== preparedId
-              ),
-            }
-            preparing.delete(event.index)
-          }
           let args: Record<string, unknown> = {}
           try {
             args = event.call.arguments

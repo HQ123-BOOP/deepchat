@@ -324,13 +324,18 @@ export const createPiAiProvider = (config: PiAiConfig): ChatProvider => ({
     const effort = request.reasoningEffort ?? 'off'
     const enabled = effort !== 'off'
     const isDeepSeek = isDeepSeekConfig(config)
+    const context = toContext(request, config)
+    // DeepSeek 非思考模式不接受 client tools，带上 tools 会被服务端 400 拒绝
+    if (isDeepSeek && !enabled) {
+      delete context.tools
+    }
 
     let events: AsyncIterable<AssistantMessageEvent>
     try {
       const api = await loadApi(config.api)
       events = api.stream(
         buildModel(config, request.model),
-        normalizeContext(toContext(request, config)),
+        normalizeContext(context),
         {
           apiKey: config.apiKey,
           signal,
@@ -384,9 +389,17 @@ export const createPiAiProvider = (config: PiAiConfig): ChatProvider => ({
           }
           break
         }
-        case 'toolcall_delta':
-          yield { type: 'tool_prepare_delta', index: event.contentIndex, delta: event.delta }
+        case 'toolcall_delta': {
+          // 有些端点把工具名放在后续增量里，随增量一起带上，准备行才能识别 write/edit
+          const block = event.partial.content[event.contentIndex]
+          yield {
+            type: 'tool_prepare_delta',
+            index: event.contentIndex,
+            delta: event.delta,
+            ...(block?.type === 'toolCall' && block.name ? { name: block.name } : {}),
+          }
           break
+        }
         case 'toolcall_end':
           yield {
             type: 'tool_call',

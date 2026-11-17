@@ -27,7 +27,7 @@ export type AgentEvent =
   | { type: 'reasoning_signature'; signature: string }
   /** 工具调用参数开始生成，供 UI 在执行前先显示文件卡片 */
   | { type: 'tool_prepare'; index: number; name: string }
-  | { type: 'tool_prepare_delta'; index: number; delta: string }
+  | { type: 'tool_prepare_delta'; index: number; delta: string; name?: string }
   /** round = ReAct 循环的第几轮，同一轮内的多个工具调用可合并展示 */
   | { type: 'tool_start'; call: ToolCall; round: number; index?: number }
   | {
@@ -133,7 +133,12 @@ export async function* runAgent(
         } else if (event.type === 'tool_prepare') {
           yield { type: 'tool_prepare', index: event.index, name: event.name }
         } else if (event.type === 'tool_prepare_delta') {
-          yield { type: 'tool_prepare_delta', index: event.index, delta: event.delta }
+          yield {
+            type: 'tool_prepare_delta',
+            index: event.index,
+            delta: event.delta,
+            ...(event.name ? { name: event.name } : {}),
+          }
         } else if (event.type === 'tool_call') {
           pending.push({ call: event.call, index: event.index })
         } else if (event.type === 'done') {

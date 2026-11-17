@@ -935,15 +935,22 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
     )
     const hasDocuments = refs.some((ref) => !ref.isImage)
     const needsOcr = refs.length > 0 && (hasDocuments || !acceptsImages)
-    const toolSchemas = [
-      ...(initial.search ? WEB_TOOL_SCHEMAS : []),
-      ...(needsOcr ? [OCR_TOOL_SCHEMA] : []),
-      // 文件工具只写应用内工作区，任何对话都可以用
-      READ_TOOL_SCHEMA,
-      WRITE_TOOL_SCHEMA,
-      EDIT_TOOL_SCHEMA,
-      PRESENT_TOOL_SCHEMA,
-    ]
+    // DeepSeek 非思考模式不接受 client tools；声明了会被服务端 400 拒绝
+    const isDeepSeek =
+      settings.provider.piProvider === 'deepseek' ||
+      settings.provider.piBaseUrl.includes('deepseek.com')
+    const toolsEnabled = !(isDeepSeek && settings.reasoningEffort === 'off')
+    const toolSchemas = toolsEnabled
+      ? [
+          ...(initial.search ? WEB_TOOL_SCHEMAS : []),
+          ...(needsOcr ? [OCR_TOOL_SCHEMA] : []),
+          // 文件工具只写应用内工作区，任何对话都可以用
+          READ_TOOL_SCHEMA,
+          WRITE_TOOL_SCHEMA,
+          EDIT_TOOL_SCHEMA,
+          PRESENT_TOOL_SCHEMA,
+        ]
+      : []
     // 工具只会调 DeepSeek 服务：优先独立配置的 Key，其次旧版 Key，DeepSeek 模型可复用模型 Key
     const serviceApiKey =
       settings.provider.serviceApiKey.trim() ||
