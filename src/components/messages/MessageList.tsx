@@ -29,8 +29,9 @@ const getUploadRetryId = (messages: Message[], streaming: boolean) => {
 }
 import styles from './MessageList.module.css'
 
-/** 距底部小于该值时视为在底部，流式内容增长时跟随 */
-const STICKY_THRESHOLD = 40
+/** 距底部小于该值时视为在底部，流式内容增长时跟随。
+ *  阈值刻意留得很小：只容纳亚像素抖动，用户稍微往上滚就应脱离吸附。 */
+const STICKY_THRESHOLD = 8
 const EMPTY_VERSIONS: MessageVersions = { ids: [], index: -1 }
 
 export const MessageList = ({
