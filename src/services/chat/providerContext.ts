@@ -233,8 +233,43 @@ const finalSegment = (reply: AssistantMessage) => {
   return { texts, thinking }
 }
 
+/**
+ * 工具调用必须与结果成对。应用在工具返回前被关闭时，落库的轨迹可能只留下调用，
+ * 回放前补齐占位结果并丢弃没有调用的孤立结果，避免整个请求被服务端拒绝。
+ */
+const completeTrace = (trace: ProviderMessage[]): ProviderMessage[] => {
+  const out: ProviderMessage[] = []
+  for (let index = 0; index < trace.length; index++) {
+    const message = trace[index]
+    // 孤立结果没有可对应的调用，不能回放
+    if (message.role === 'tool') {
+      continue
+    }
+    out.push(message)
+    if (message.role !== 'assistant' || !message.toolCalls?.length) {
+      continue
+    }
+    const pending = new Map(message.toolCalls.map((call) => [call.id, call]))
+    while (index + 1 < trace.length && trace[index + 1].role === 'tool') {
+      const result = trace[++index]
+      if (result.role === 'tool' && pending.delete(result.toolCallId)) {
+        out.push(result)
+      }
+    }
+    for (const [id, call] of pending) {
+      out.push({
+        role: 'tool',
+        toolCallId: id,
+        name: call.name,
+        content: '工具调用未完成：应用在返回结果前被关闭。',
+      })
+    }
+  }
+  return out
+}
+
 const toRoundMessages = (user: UserMessage, reply: AssistantMessage): ProviderMessage[] => {
-  const trace = reply.toolTrace ?? []
+  const trace = completeTrace(reply.toolTrace ?? [])
   const { texts, thinking } = finalSegment(reply)
   const text = texts.join('\n\n')
   // 历史轮次同样回传思考与签名：DeepSeek 需要 reasoning_content 才能续接推理
