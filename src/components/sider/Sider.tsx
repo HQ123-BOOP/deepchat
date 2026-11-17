@@ -19,7 +19,7 @@ import { IconButton } from '../base/IconButton.js'
 import { Modal } from '../base/Modal.js'
 import { showToast } from '../base/toastState.js'
 import { openSettings } from '../settings/settingsDialogState.js'
-import { HistorySearchDialog } from '../search/HistorySearchDialog.js'
+import { openHistorySearch } from '../search/historySearchState.js'
 import { closeMobileSider, openMobileSider, useMobileSider } from './mobileSiderState.js'
 import { SessionItem } from './SessionItem.js'
 import styles from './Sider.module.css'
@@ -40,7 +40,6 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const [deletePending, setDeletePending] = useState(false)
   // 对话分组默认展开；收起/展开用高度过渡，内容整体推动
   const [chatGroupOpen, setChatGroupOpen] = useState(true)
-  const [searching, setSearching] = useState(false)
   // 2 秒内连点 5 次品牌标志打开项目主页
   const brandClicks = useRef<number[]>([])
 
@@ -90,6 +89,15 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
           <span className={styles.brandName}>DeepChat</span>
           <span className={styles.brandVersion}>v{appVersion()}</span>
         </div>
+        {!mobile ? (
+          <IconButton
+            size="m"
+            icon={<IconPlusOutline16 />}
+            tooltip={t('newChat')}
+            tooltipPlacement="bottom"
+            onClick={() => newChat()}
+          />
+        ) : null}
         <IconButton
           size="m"
           icon={<IconPanelLeftOutline16 />}
@@ -98,31 +106,20 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
           onClick={() => (mobile ? closeMobileSider() : setSiderCollapsed(true))}
         />
       </div>
-      {/* 搜索入口与新建对话共用一条胶囊；点击主体打开全对话搜索弹窗 */}
-      <div className={styles.searchEntry}>
-        <button
-          type="button"
-          className={styles.searchEntryMain}
-          onClick={() => setSearching(true)}
-        >
-          <span className={styles.searchEntryIcon}>
-            <IconSearchOutline16 />
-          </span>
-          {t('searchConversations')}
-        </button>
-        <button
-          type="button"
-          className={styles.searchEntryPlus}
-          aria-label={t('newChat')}
-          onClick={() => {
-            newChat()
-            closeMobileSider()
-          }}
-        >
-          <IconPlusOutline16 />
-        </button>
-      </div>
-      {searching ? <HistorySearchDialog onClose={() => setSearching(false)} /> : null}
+      {/* 搜索入口：点击打开全对话搜索弹窗 */}
+      <button
+        type="button"
+        className={styles.searchEntry}
+        onClick={() => {
+          closeMobileSider()
+          openHistorySearch()
+        }}
+      >
+        <span className={styles.searchEntryIcon}>
+          <IconSearchOutline16 />
+        </span>
+        {t('searchConversations')}
+      </button>
       <div className={styles.listWrap}>
         <div
           className={styles.list}

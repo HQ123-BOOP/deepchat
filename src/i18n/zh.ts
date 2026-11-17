@@ -4,6 +4,7 @@ export const zh = {
   expandSiderbarButton: '打开边栏',
   collapseSiderbarButton: '收起边栏',
   newChat: '开启新对话',
+  searchShortcut: '搜索 Ctrl K',
   searchConversations: '搜索对话',
   searchEmpty: '暂无相关结果',
   searchHint: '输入关键词搜索全部对话',

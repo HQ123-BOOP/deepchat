@@ -6,6 +6,7 @@ export const en = {
   expandSiderbarButton: 'Open sidebar',
   collapseSiderbarButton: 'Close sidebar',
   newChat: 'New chat',
+  searchShortcut: 'Search Ctrl K',
   searchConversations: 'Search chats',
   searchEmpty: 'No related results',
   searchHint: 'Type a keyword to search all chats',

@@ -12,6 +12,12 @@ import {
 } from '../services/chat/store.js'
 import { SearchPanel } from '../components/search/SearchPanel.js'
 import { closeSearchPanel } from '../components/search/searchPanelState.js'
+import { HistorySearchDialog } from '../components/search/HistorySearchDialog.js'
+import {
+  closeHistorySearch,
+  openHistorySearch,
+  useHistorySearch,
+} from '../components/search/historySearchState.js'
 import { SessionView } from '../components/session/SessionView.js'
 import { MobileHeader } from '../components/session/MobileHeader.js'
 import { Welcome } from '../components/session/Welcome.js'
@@ -52,6 +58,7 @@ export const App = () => {
   )
   const activeId = useChatStore((state) => state.activeId)
   const mobileSiderOpen = useMobileSider((state) => state.open) && isMobile
+  const historySearchOpen = useHistorySearch((state) => state.open)
 
   usePreventPageScroll(isMobile)
 
@@ -87,6 +94,18 @@ export const App = () => {
       })
     }, 4000)
     return () => window.clearTimeout(timer)
+  }, [])
+
+  // 搜索快捷键：Ctrl/Cmd + K 打开全对话搜索
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        openHistorySearch()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
   }, [])
 
   return (
@@ -151,6 +170,7 @@ export const App = () => {
         <SearchPanel />
       </div>
       <SettingsDialog />
+      {historySearchOpen ? <HistorySearchDialog onClose={closeHistorySearch} /> : null}
       <Toast />
     </>
   )

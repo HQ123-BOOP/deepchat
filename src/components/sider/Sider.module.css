@@ -62,23 +62,25 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* 搜索入口 + 新建对话共用一条胶囊 */
+/* 搜索入口胶囊 */
 .searchEntry {
   position: relative;
   display: flex;
   align-items: center;
+  gap: 8px;
   flex-shrink: 0;
   box-sizing: border-box;
   width: 100%;
   height: 40px;
-  padding: 0 6px 0 16px;
+  padding: 0 16px;
   border-radius: 100px;
   border: 1px solid rgba(103, 158, 254, 0);
   background: var(--dsw-alias-button-elevated-fill);
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-label-secondary);
   font: inherit;
   font-size: 14px;
-  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
   user-select: none;
   box-shadow:
     0 -2px 2px rgba(72, 104, 178, 0.04),
@@ -101,51 +103,10 @@
   }
 }
 
-.searchEntryMain {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  padding: 0;
-  border: none;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
 .searchEntryIcon {
   display: flex;
   flex-shrink: 0;
   color: var(--dsw-alias-label-tertiary);
-}
-
-.searchEntryPlus {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  color: var(--dsw-alias-label-secondary);
-  background: none;
-  cursor: pointer;
-  transition: background-color 0.2s, color 0.2s;
-
-  svg {
-    width: 16px;
-    height: 16px;
-  }
-
-  &:hover {
-    color: var(--dsw-alias-label-primary);
-    background: var(--dsw-alias-interactive-bg-hover);
-  }
 }
 
 .listWrap {
