@@ -137,6 +137,13 @@ jobs:
           echo "ANDROID_NDK_HOME=$sdk/ndk/27.3.13750724" >> "$GITHUB_ENV"
           echo "NDK_HOME=$sdk/ndk/27.3.13750724" >> "$GITHUB_ENV"
 
+      # release 构建沿用 localDebug 签名配置，需要 $HOME/.android/debug.keystore。
+      # 仓库里的固定副本保证每次 CI 签名一致，产出的 APK 可以覆盖升级。
+      - name: Restore debug keystore
+        run: |
+          mkdir -p "$HOME/.android"
+          cp .github/debug.keystore "$HOME/.android/debug.keystore"
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
