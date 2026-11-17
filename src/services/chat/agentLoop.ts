@@ -38,7 +38,7 @@ export type AgentEvent =
       /** 附件解析结果，供 UI 显示一行可点开的记录 */
       attachment?: AttachmentSummary
     }
-  | { type: 'done'; stopReason: 'stop' | 'length' | 'tool_limit' | 'error'; error?: string }
+  | { type: 'done'; stopReason: 'stop' | 'length' | 'error'; error?: string }
 
 export type AgentOptions = {
   provider: ChatProvider
@@ -58,13 +58,9 @@ export type AgentOptions = {
   /** 本地 id → 文件名 */
   fileNames?: Record<string, string>
   signal?: AbortSignal
-  /** 最多几轮工具调用，防止死循环 */
-  maxSteps?: number
   temperature?: number
   reasoningEffort?: ReasoningEffort
 }
-
-const DEFAULT_MAX_STEPS = 4
 
 /**
  * 驱动一轮对话。事件按产生顺序产出，调用方据此更新 UI；函数结束时消息历史
@@ -73,11 +69,11 @@ const DEFAULT_MAX_STEPS = 4
 export async function* runAgent(
   options: AgentOptions
 ): AsyncGenerator<AgentEvent> {
-  const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS
   const messages: ProviderMessage[] = [...options.messages]
   const tools = options.tools?.length ? options.tools : undefined
 
-  for (let step = 0; step < maxSteps; step++) {
+  // 不设轮次上限：模型继续调用工具就继续驱动，直到它给出正文、报错或被 signal 取消。
+  for (let step = 0; ; step++) {
     const pending: ToolCall[] = []
     let finish: 'stop' | 'length' | 'tool_calls' | 'error' = 'stop'
     let text = ''
@@ -174,11 +170,6 @@ export async function* runAgent(
       }
       yield { type: 'tool_result', call, round: step, sources, ok, attachment }
       messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content })
-    }
-
-    if (step === maxSteps - 1) {
-      yield { type: 'done', stopReason: 'tool_limit' }
-      return
     }
   }
 }
