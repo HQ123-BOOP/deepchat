@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">"chat-demo"</string>
-    <string name="main_activity_title">"chat-demo"</string>
+    <string name="app_name">"DeepChat"</string>
+    <string name="main_activity_title">"DeepChat"</string>
 </resources>
