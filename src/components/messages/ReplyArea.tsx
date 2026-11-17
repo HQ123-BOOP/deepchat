@@ -99,7 +99,7 @@ export const ReplyArea = memo(function ReplyArea({
         <div className={styles.steps}>
           {view.steps.map((step, index) => (
             <StepItem
-              key={stepKey(step, index)}
+              key={stepKey(step)}
               step={step}
               message={message}
               sources={view.sources}
@@ -113,10 +113,8 @@ export const ReplyArea = memo(function ReplyArea({
   )
 })
 
-const stepKey = (step: Step, index: number) =>
-  step.type === 'thinking' || step.type === 'text' || step.type === 'search'
-    ? step.key
-    : `${step.type}-${index}`
+/** 所有步骤都有稳定 key，避免多轮工具调用时因下标变化重新挂载导致闪动 */
+const stepKey = (step: Step) => step.key
 
 const StepItem = ({
   step,
@@ -449,12 +447,15 @@ const FindRow = ({ step, isLast }: { step: FindStep; isLast: boolean }) => {
   )
 }
 
-/** 阅读用户消息中的链接：视图只保留仍在读取的链接。 */
+/** 阅读用户消息中的链接：进行中显示「正在阅读」，完成后保留卡片显示结果 */
 const ReadLinkRow = ({ step, isLast }: { step: ReadLinkStep; isLast: boolean }) => {
   const t = useTranslate()
+  const pending = step.links.some((link) => link.status === 'wip')
   return (
     <ToolRow icon={<IconLinkOutline16 />} isLast={isLast}>
-      <span className={clsx(styles.intro, styles.shimmer)}>{t('readingLink')}</span>
+      <span className={clsx(styles.intro, pending && styles.shimmer)}>
+        {t(pending ? 'readingLink' : 'readLink')}
+      </span>
       {step.links.map((link) => (
         <PageLink key={link.id} page={link} />
       ))}

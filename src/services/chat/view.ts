@@ -55,14 +55,15 @@ export type PageItem = {
   status: ToolStatus
 }
 
-export type OpenStep = { type: 'open'; pages: PageItem[] }
+export type OpenStep = { type: 'open'; key: string; pages: PageItem[] }
 
 export type FindStep = {
   type: 'find'
+  key: string
   patterns: { id: string; pattern: string; status: ToolStatus }[]
 }
 
-export type ReadLinkStep = { type: 'read_link'; links: PageItem[] }
+export type ReadLinkStep = { type: 'read_link'; key: string; links: PageItem[] }
 
 /** 阅读、OCR 或未知工具的失败行 */
 export type ToolErrorStep = {
@@ -214,7 +215,10 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
   const registry = new SourceRegistry()
   const searchResults: Source[] = []
   const steps: Step[] = []
-  const mergedSearch = new Map<ServerToolKind, SearchStep>()
+  // 合并键 = 轮次 + 工具种类：同一轮的同类调用合并，不同轮次或不同工具各占一张卡片。
+  // round 缺省（历史归档/DeepSeek 原生）时按每条调用独立，避免跨轮误合并。
+  const mergedSearch = new Map<string, SearchStep>()
+  const mergedPages = new Map<string, OpenStep | ReadLinkStep | FindStep>()
   let mergedThinking: ThinkingStep | null = null
   let pendingText: { index: number; text: string; citations?: TextCitation[] }[] = []
 
@@ -313,7 +317,9 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
     flushPreamble()
     const { kind, input } = block
     const status = getStatus(result, streaming)
-    const last = steps.at(-1)
+    // 合并键 = 轮次 + 工具：同一轮的同类调用合并成一张卡片，不同轮或不同工具各占一张。
+    // 轮次缺省（DeepSeek 原生路径 / 历史归档）时沿用按种类聚合的旧行为。
+    const mergeKey = `${block.round ?? 'legacy'}:${kind}`
 
     if (input.action === 'search') {
       const { queries } = input
@@ -332,12 +338,7 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
                 item.type === 'web_search_tool_result_error'
             )
           : undefined
-      // 普通搜索按种类聚合到首次出现的位置；边想边搜只合并相邻、同种类的调用。
-      const target = isDeepSearchKind(kind)
-        ? last?.type === 'search' && last.kind === kind
-          ? last
-          : null
-        : mergedSearch.get(kind)
+      const target = mergedSearch.get(mergeKey)
       if (target) {
         target.queries.push(...queries)
         target.results.push(...found.filter((source) => !target.results.includes(source)))
@@ -356,9 +357,7 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
           ...(errorItem ? { error: errorItem.error_code } : {}),
         }
         steps.push(step)
-        if (!isDeepSearchKind(kind)) {
-          mergedSearch.set(kind, step)
-        }
+        mergedSearch.set(mergeKey, step)
       }
       return
     }
@@ -370,28 +369,34 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
       title: (fetched?.type === 'web_fetch_result' ? fetched.content.title : null) || input.url,
       status,
     }
+    // 不同工具（读链接 / 打开页面 / 页内查找）即使同一轮也分开显示；
+    // 同一轮的同一工具按 pageKey 聚合到首次出现的那张卡片。
+    const pageKey = `${mergeKey}:${input.action}`
+    const target = mergedPages.get(pageKey)
     if (input.action === 'read_link') {
-      // 阅读链接仅展示进行态；成功、失败或中止后隐藏，原始结果仍保留用于后续请求。
-      if (status !== 'wip') {
-        return
-      }
-      if (last?.type === 'read_link') {
-        last.links.push(page)
+      if (target?.type === 'read_link') {
+        target.links.push(page)
       } else {
-        steps.push({ type: 'read_link', links: [page] })
+        const step: ReadLinkStep = { type: 'read_link', key: pageKey, links: [page] }
+        steps.push(step)
+        mergedPages.set(pageKey, step)
       }
     } else if (input.action === 'open_page') {
-      if (last?.type === 'open') {
-        last.pages.push(page)
+      if (target?.type === 'open') {
+        target.pages.push(page)
       } else {
-        steps.push({ type: 'open', pages: [page] })
+        const step: OpenStep = { type: 'open', key: pageKey, pages: [page] }
+        steps.push(step)
+        mergedPages.set(pageKey, step)
       }
     } else {
       const item = { id: block.id, pattern: input.pattern, status }
-      if (last?.type === 'find') {
-        last.patterns.push(item)
+      if (target?.type === 'find') {
+        target.patterns.push(item)
       } else {
-        steps.push({ type: 'find', patterns: [item] })
+        const step: FindStep = { type: 'find', key: pageKey, patterns: [item] }
+        steps.push(step)
+        mergedPages.set(pageKey, step)
       }
     }
   })
