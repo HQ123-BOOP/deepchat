@@ -5,6 +5,7 @@ import { INDEX_PATH, MANIFEST_PATH, USER_PATH, parseSessionPath, sessionFilesDir
 import { selectInRange, type BackupOptions } from './range.js'
 import { checkManifest, readSessionFile, readSessionIndex } from './schema.js'
 import { toLocalSession, type LocalSession } from './toLocal.js'
+import type { Session } from '../types.js'
 import {
   ArchiveError,
   isZipFile,
@@ -91,10 +92,27 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
   const stored = new Map<string, string>()
   const streaming = options.range.kind === 'all'
   const pending: LocalSession[] = []
+  /** 批量写缓冲：SQLite 单条写入很快，但一次 IPC 写一批远胜逐条往返 */
+  const sessionBuffer: Session[] = []
+  const fileBuffer: { id: string; blob: Blob }[] = []
+  const SESSION_BATCH = 64
+  const FILE_BATCH = 16
   let manifest = false
   let index: SessionIndexEntry[] | undefined
   let currentSessionId: string | undefined
   let kept = 0
+
+  const flushBuffers = async () => {
+    if (sessionBuffer.length > 0) {
+      const batch = sessionBuffer.splice(0)
+      await db.addStagingSessions(batch)
+      kept += batch.length
+    }
+    if (fileBuffer.length > 0) {
+      const batch = fileBuffer.splice(0)
+      await db.saveStagingFiles(batch)
+    }
+  }
 
   const saveImage = async (entry: ArchiveEntry, id: string) => {
     if (stored.has(id)) {
@@ -103,8 +121,11 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
     }
     const data = await readEntry(entry)
     const type = imageType(new Uint8Array(await data.slice(0, 16).arrayBuffer()))
-    await db.saveStagingFiles([{ id, blob: new Blob([data], { type }) }])
+    fileBuffer.push({ id, blob: new Blob([data as BlobPart], { type }) })
     stored.set(id, type)
+    if (fileBuffer.length >= FILE_BATCH) {
+      await flushBuffers()
+    }
   }
 
   /** 只登记保留会话的图片，跳过的会话其图片条目会被忽略 */
@@ -112,8 +133,10 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
     for (const [imagePath, id] of local.images) {
       images.set(imagePath, id)
     }
-    await db.addStagingSession(local.session)
-    kept += 1
+    sessionBuffer.push(local.session)
+    if (sessionBuffer.length >= SESSION_BATCH) {
+      await flushBuffers()
+    }
   }
 
   const flushPending = async () => {
@@ -188,6 +211,8 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
   if (!streaming && pending.length > 0) {
     await flushPending()
   }
+  // 把缓冲里的会话与图片全部落库，再做完整性校验与类型回填
+  await flushBuffers()
   // index 只列出成功写出的会话，与会话文件一一对应。
   const listed = new Set(index?.map((entry) => entry.id))
   if (
