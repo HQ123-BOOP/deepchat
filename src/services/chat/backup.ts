@@ -1,7 +1,7 @@
 import { formatDate } from '../../utils/format.js'
 import * as db from './db.js'
 import { selectInRange, type BackupOptions } from './history/range.js'
-import { replaceHistory, useChatStore } from './store.js'
+import { mergeHistory, replaceHistory, useChatStore } from './store.js'
 import type { Session } from './types.js'
 
 import { BackupError } from './history/errors.js'
@@ -73,12 +73,13 @@ export const exportHistory = (options: BackupOptions): Promise<{ name: string; b
  * 确认覆盖后调用：先检查 ZIP 格式与版本，校验失败时保留正在生成的回答；
  * 通过后从 ZIP 流式写入暂存，成功才替换原有会话与图片原件。返回导入的会话数。
  */
+/** 导入归档：会话合并进现有历史，重复的按更新时间保留较新版本，不覆盖整库。 */
 export const importHistory = (file: File, options: BackupOptions): Promise<number> =>
   enqueueBackup(async () => {
     const { checkArchiveFormat, importArchive } = await import('./history/importArchive.js')
     await checkArchiveFormat(file)
     await assertImportSpace(file)
-    return replaceHistory(() => importArchive(file, options))
+    return mergeHistory(() => importArchive(file, options))
   })
 
 /** 确认删除后调用：以空历史原子替换全部本地会话与附件，保留 API Key 和其他设置。 */

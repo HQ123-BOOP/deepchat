@@ -474,6 +474,58 @@ export const replaceHistory = async (write: () => Promise<void>): Promise<number
   }
 }
 
+/**
+ * 把导入的会话合并进现有历史：新增或较新的版本覆盖同名会话，其余跳过；
+ * 不清空草稿、未打开会话与设置，只刷新列表并按需重读受影响的缓存。
+ */
+export const mergeHistory = async (write: () => Promise<void>): Promise<number> => {
+  if (get().importingHistory) {
+    throw new Error('History import is already in progress')
+  }
+  set({ importingHistory: true })
+  try {
+    for (const controller of Object.values(get().streaming)) {
+      controller.abort()
+    }
+    await Promise.all(deletionTasks)
+    historyEpoch += 1
+    initTask = undefined
+    sessionLoads.clear()
+    await waitForIdle()
+    await db.clearStaging()
+    let merged: Awaited<ReturnType<typeof db.mergeStaging>>
+    try {
+      await write()
+      merged = await db.mergeStaging()
+    } catch (error) {
+      await db.clearStaging().catch(db.reportStorageError('clear unfinished history import'))
+      throw error
+    }
+    sessionAccess.clear()
+    set({
+      ready: true,
+      initError: false,
+      sessions: sortSessions(merged.summaries.slice(0, SESSION_PAGE_SIZE)),
+      sessionsHasMore: merged.summaries.length > SESSION_PAGE_SIZE,
+      sessionsLoadingMore: false,
+      sessionCache: {},
+      sessionLoadErrors: {},
+      sessionSaveErrors: {},
+    })
+    return merged.imported
+  } finally {
+    set({ importingHistory: false })
+    retrySaveSessions()
+    const { activeId } = get()
+    // 导入可能替换了当前会话，缓存已清空，重新读取一次
+    if (activeId !== null) {
+      void ensureSessionLoaded(activeId)
+    } else if (!get().ready) {
+      void initChat()
+    }
+  }
+}
+
 export const newChat = () => {
   if (!get().importingHistory) {
     set({ activeId: null })

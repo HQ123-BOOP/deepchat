@@ -762,6 +762,175 @@ pub fn db_update_staging_file_types(
     tx.commit().map_err(|e| e.to_string())
 }
 
+/// 会话摘要里引用的附件 id
+fn summary_file_ids(summary: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(summary) else {
+        return Vec::new();
+    };
+    value
+        .get("fileIds")
+        .and_then(|v| v.as_array())
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|id| id.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 会话被覆盖后回收不再被任何会话引用的附件原件与识别文本
+fn reclaim_files(tx: &rusqlite::Transaction<'_>, ids: &[String]) -> Result<(), String> {
+    for id in ids {
+        let refs: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM file_refs WHERE file_id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if refs == 0 {
+            tx.execute("DELETE FROM files WHERE id = ?1", params![id])
+                .map_err(|e| e.to_string())?;
+            tx.execute("DELETE FROM file_texts WHERE id = ?1", params![id])
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Serialize)]
+pub struct MergeResult {
+    /// 实际写入的会话数（新增 + 覆盖较新的旧版本）
+    imported: usize,
+    /// 合并后的全部会话摘要
+    summaries: Vec<String>,
+}
+
+/// 把暂存会话合并进正式数据：按 id 比对 updated_at，导入版本更新才覆盖，其余跳过。
+#[tauri::command]
+pub fn db_merge_staging(db: State<'_, Db>) -> Result<MergeResult, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let staged: Vec<(String, String, i64, i64, String, String, String)> = {
+        let mut stmt = tx
+            .prepare(
+                "SELECT id, title, created_at, updated_at, data, summary, search_text
+                 FROM sessions_staging",
+            )
+            .map_err(|e| e.to_string())?;
+        let mapped = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        mapped
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+    let mut imported = 0usize;
+    for (id, title, created_at, updated_at, data, summary, search_text) in &staged {
+        let existing: Option<i64> = tx
+            .query_row(
+                "SELECT updated_at FROM sessions WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let mut previous_files: Vec<String> = Vec::new();
+        if let Some(existing) = existing {
+            // 本地同样新或更新时保留本地版本
+            if *updated_at <= existing {
+                continue;
+            }
+            if let Some(previous) = tx
+                .query_row(
+                    "SELECT summary FROM session_summaries WHERE id = ?1",
+                    params![id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?
+            {
+                previous_files = summary_file_ids(&previous);
+            }
+            tx.execute("DELETE FROM file_refs WHERE session_id = ?1", params![id])
+                .map_err(|e| e.to_string())?;
+        }
+        tx.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at, data)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET title = excluded.title, created_at = excluded.created_at,
+               updated_at = excluded.updated_at, data = excluded.data",
+            params![id, title, created_at, updated_at, data],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT INTO session_summaries (id, title, created_at, updated_at, summary)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET title = excluded.title, created_at = excluded.created_at,
+               updated_at = excluded.updated_at, summary = excluded.summary",
+            params![id, title, created_at, updated_at, summary],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT INTO search_texts (session_id, title, body, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(session_id) DO UPDATE SET title = excluded.title, body = excluded.body,
+               updated_at = excluded.updated_at",
+            params![id, title, search_text, updated_at],
+        )
+        .map_err(|e| e.to_string())?;
+        // 新附件只从暂存带到正式表，已有原件不覆盖
+        let new_files = summary_file_ids(summary);
+        for file_id in &new_files {
+            tx.execute(
+                "INSERT OR IGNORE INTO files (id, mime, bytes)
+                 SELECT id, mime, bytes FROM files_staging WHERE id = ?1",
+                params![file_id],
+            )
+            .map_err(|e| e.to_string())?;
+            tx.execute(
+                "INSERT OR IGNORE INTO file_refs (session_id, file_id) VALUES (?1, ?2)",
+                params![id, file_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        // 旧版本独有、且已无人引用的附件在这里回收
+        let obsolete: Vec<String> = previous_files
+            .into_iter()
+            .filter(|file| !new_files.contains(file))
+            .collect();
+        reclaim_files(&tx, &obsolete)?;
+        imported += 1;
+    }
+    tx.execute("DELETE FROM sessions_staging", [])
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM files_staging", [])
+        .map_err(|e| e.to_string())?;
+    let summaries: Vec<String> = {
+        let mut stmt = tx
+            .prepare("SELECT summary FROM session_summaries ORDER BY updated_at DESC, id DESC")
+            .map_err(|e| e.to_string())?;
+        let mapped = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        mapped
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(MergeResult { imported, summaries })
+}
+
 /// 用暂存替换正式数据（一个事务）；返回全部会话的摘要 JSON 列表
 #[tauri::command]
 pub fn db_commit_staging(db: State<'_, Db>) -> Result<Vec<String>, String> {
@@ -773,6 +942,7 @@ pub fn db_commit_staging(db: State<'_, Db>) -> Result<Vec<String>, String> {
     tx.execute("DELETE FROM file_texts", []).map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM file_refs", []).map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM search_texts", []).map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM workspace_files", []).map_err(|e| e.to_string())?;
     tx.execute(
         "INSERT INTO sessions (id, title, created_at, updated_at, data)
          SELECT id, title, created_at, updated_at, data FROM sessions_staging",

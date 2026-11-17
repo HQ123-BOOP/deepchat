@@ -66,8 +66,13 @@ export const RangePicker = ({
           max={3650}
           value={value.days}
           disabled={disabled}
+          onFocus={() => pick('days')}
           onChange={(event) =>
-            onChange({ ...value, days: clamp(Number(event.target.value), 1, 3650) })
+            onChange({
+              ...value,
+              kind: 'days',
+              days: clamp(Number(event.target.value), 1, 3650),
+            })
           }
         />
         <span>{t('historyRangeDaysUnit')}</span>
@@ -89,8 +94,13 @@ export const RangePicker = ({
           max={10000}
           value={value.count}
           disabled={disabled}
+          onFocus={() => pick('latest')}
           onChange={(event) =>
-            onChange({ ...value, count: clamp(Number(event.target.value), 1, 10000) })
+            onChange({
+              ...value,
+              kind: 'latest',
+              count: clamp(Number(event.target.value), 1, 10000),
+            })
           }
         />
         <span>{t('historyRangeLatestUnit')}</span>

@@ -320,6 +320,22 @@ export const commitStaging = async (): Promise<SessionSummary[]> => {
   return rows.map(toSessionSummaryOf)
 }
 
+export type MergeResult = {
+  /** 实际写入的会话数：新增的，以及覆盖了更旧本地版本的部分 */
+  imported: number
+  /** 合并后的全部会话摘要 */
+  summaries: SessionSummary[]
+}
+
+/** 合并暂存：按 id 去重，导入版本更新才覆盖；本地同样新或更新的会话保留原样 */
+export const mergeStaging = async (): Promise<MergeResult> => {
+  const result = await invoke<{ imported: number; summaries: string[] }>('db_merge_staging')
+  return {
+    imported: result.imported,
+    summaries: result.summaries.map(toSessionSummaryOf),
+  }
+}
+
 /** 全对话内容搜索：标题与消息文本（含思考、工具查询）都参与匹配。 */
 export const searchConversations = async (
   query: string

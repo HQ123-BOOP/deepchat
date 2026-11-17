@@ -1049,7 +1049,11 @@ const useHistoryImport = () => {
         range: toBackupRange(range),
         onProgress: setProgress,
       })
-      setStatus({ key: count === 1 ? 'historyImportedOne' : 'historyImported', params: { count } })
+      setStatus(
+        count === 0
+          ? { key: 'historyImportNothingNew' }
+          : { key: count === 1 ? 'historyImportedOne' : 'historyImported', params: { count } }
+      )
     } catch (error) {
       setStatus(errorStatus('historyImportFailed', error))
     } finally {
