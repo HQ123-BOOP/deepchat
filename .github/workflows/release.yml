@@ -95,10 +95,93 @@ jobs:
             src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: error
 
+  android:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Java 21
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      # compileSdk/targetSdk = 37，runner 默认不带这个 platform，显式补齐。
+      - name: Install Android SDK components
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --install \
+            "platforms;android-37.0" \
+            "build-tools;36.0.0" \
+            "ndk;27.3.13750724" >/dev/null 2>&1
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.6.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Set version
+        run: node .github/scripts/set-version.mjs "${{ needs.prepare.outputs.version }}"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 原生 ASR 库不进仓库（单个 .so 200+ MB）。从上游 Release 取官方预编译包，
+      # libomp.so / libc++_shared.so 则是 NDK 自带，与本地构建用的字节一致。
+      - name: Prepare CrispASR native libraries
+        env:
+          CRISPASR_VERSION: '0.8.53'
+        run: |
+          set -euo pipefail
+          jni="src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a"
+          mkdir -p "$jni"
+          archive="crispasr-android-arm64-v8a.tar.gz"
+          curl -fsSL --retry 3 -o "/tmp/$archive" \
+            "https://github.com/CrispStrobe/CrispASR/releases/download/v${CRISPASR_VERSION}/$archive"
+          mkdir -p /tmp/crispasr
+          tar -xzf "/tmp/$archive" -C /tmp/crispasr
+          for lib in libcrispasr.so libggml.so libggml-base.so libggml-cpu.so; do
+            cp "/tmp/crispasr/crispasr-android-arm64-v8a/lib/$lib" "$jni/"
+          done
+          cp "$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -path '*/lib/clang/*/lib/linux/aarch64/libomp.so' | head -1)" "$jni/"
+          cp "$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -path '*/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so' | head -1)" "$jni/"
+          ls -lh "$jni"
+
+      - name: Build Android APK
+        run: pnpm tauri android build --apk -t aarch64 --ci
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
+          if-no-files-found: error
+
   publish:
     needs:
       - prepare
       - windows
+      - android
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -124,9 +207,9 @@ jobs:
             gh release create "$TAG" -R "$repo" --title "$TAG" --notes-file "$notes"
           fi
           shopt -s nullglob
-          files=(artifacts/windows-bundles/nsis/*.exe artifacts/windows-bundles/msi/*.msi)
+          files=(artifacts/windows-bundles/nsis/*.exe artifacts/windows-bundles/msi/*.msi artifacts/android-apk/*.apk)
           if [ ${#files[@]} -eq 0 ]; then
-            echo "no desktop bundles found" >&2
+            echo "no bundles found" >&2
             exit 1
           fi
           gh release upload "$TAG" -R "$repo" "${files[@]}" --clobber
