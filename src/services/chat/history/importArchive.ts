@@ -152,9 +152,12 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
     const stored = new Map<string, string>()
     const sessionBuffer: Session[] = []
     const fileBuffer: { id: string; blob: Blob }[] = []
-    // 移动端 IPC 对单次 payload 很敏感：图片每批 2 张，会话每批 16 条
+    // 移动端 IPC 对单次 payload 很敏感：会话每批 16 条；
+    // 图片按累计 3MB 或 8 张切批，小图少往返、大图不超限。
     const SESSION_BATCH = 16
-    const FILE_BATCH = 2
+    const FILE_BATCH = 8
+    const FILE_BATCH_BYTES = 3 * 1024 * 1024
+    let fileBytes = 0
     let kept = 0
 
     const flushBuffers = async () => {
@@ -165,6 +168,7 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
       }
       if (fileBuffer.length > 0) {
         const batch = fileBuffer.splice(0)
+        fileBytes = 0
         await db.saveStagingFiles(batch)
       }
     }
@@ -190,13 +194,26 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
       const type = imageType(new Uint8Array(await data.slice(0, 16).arrayBuffer()))
       fileBuffer.push({ id, blob: new Blob([data as BlobPart], { type }) })
       stored.set(id, type)
-      if (fileBuffer.length >= FILE_BATCH) {
+      fileBytes += data.size
+      if (fileBuffer.length >= FILE_BATCH || fileBytes >= FILE_BATCH_BYTES) {
         await flushBuffers()
       }
     }
 
-    for await (const entry of readSelectedArchive(file, keep, (done, total) =>
+    // 解压按 64KB 回调一次；直接转发会让设置页每 64KB 重渲染一次，
+    // 二十来条会话就能堆出上千次渲染。这里按 120ms 节流。
+    let lastProgress = 0
+    const reportProgress = (done: number, total: number, force = false) => {
+      const now = Date.now()
+      if (!force && now - lastProgress < 120) {
+        return
+      }
+      lastProgress = now
       options.onProgress?.({ done, total })
+    }
+
+    for await (const entry of readSelectedArchive(file, keep, (done, total) =>
+      reportProgress(done, total)
     )) {
       const sessionId = parseSessionPath(entry.path)
       if (sessionId !== null) {
