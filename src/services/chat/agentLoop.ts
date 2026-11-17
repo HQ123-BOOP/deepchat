@@ -38,7 +38,12 @@ export type AgentEvent =
       /** 附件解析结果，供 UI 显示一行可点开的记录 */
       attachment?: AttachmentSummary
       /** write / edit 的产物，供 UI 显示文件卡片 */
-      workspace?: { path: string; operation: 'created' | 'updated'; chars: number }
+      workspace?: {
+        path: string
+        action: 'create' | 'update' | 'edit'
+        added: number
+        removed: number
+      }
       /** read 的窗口信息，供 UI 显示读取卡片 */
       read?: {
         kind: 'attachment' | 'workspace'
@@ -158,7 +163,9 @@ export async function* runAgent(
       let content: string
       let sources: ToolSource[] = []
       let attachment: AttachmentSummary | undefined
-      let workspace: { path: string; operation: 'created' | 'updated'; chars: number } | undefined
+      let workspace:
+        | { path: string; action: 'create' | 'update' | 'edit'; added: number; removed: number }
+        | undefined
       let read:
         | { kind: 'attachment' | 'workspace'; target: string; name: string; from: number; to: number; total: number }
         | undefined

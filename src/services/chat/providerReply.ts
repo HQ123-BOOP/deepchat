@@ -273,8 +273,9 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
             type: 'workspace_file',
             id: toolUseId(event.call.id),
             path: event.workspace.path,
-            operation: event.workspace.operation,
-            chars: event.workspace.chars,
+            action: event.workspace.action,
+            added: event.workspace.added,
+            removed: event.workspace.removed,
           })
           options.onChange(reply)
           continue

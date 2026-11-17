@@ -1182,27 +1182,63 @@ pub fn ws_read(
     .map_err(|e| e.to_string())
 }
 
-/// 新建或整体覆盖工作区文件，返回 create / update
+/// 行级增删统计：先裁掉首尾相同的行，中间部分按新旧行数计入
+fn line_diff_stats(before: &str, after: &str) -> (usize, usize) {
+    let old: Vec<&str> = before.lines().collect();
+    let new: Vec<&str> = after.lines().collect();
+    let mut start = 0;
+    while start < old.len() && start < new.len() && old[start] == new[start] {
+        start += 1;
+    }
+    let mut old_end = old.len();
+    let mut new_end = new.len();
+    while old_end > start && new_end > start && old[old_end - 1] == new[new_end - 1] {
+        old_end -= 1;
+        new_end -= 1;
+    }
+    (new_end - start, old_end - start)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteStats {
+    operation: String,
+    added: i64,
+    removed: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditStats {
+    added: i64,
+    removed: i64,
+}
+
+/// 新建或整体覆盖工作区文件，返回 create / update 与行级增删数
 #[tauri::command]
 pub fn ws_write(
     db: State<'_, Db>,
     session_id: String,
     path: String,
     content: String,
-) -> Result<String, String> {
+) -> Result<WriteStats, String> {
     let path = workspace_path(&path)?;
     if content.len() > WORKSPACE_MAX_BYTES {
         return Err(format!("file content exceeds {WORKSPACE_MAX_BYTES} bytes"));
     }
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let existed: Option<i64> = conn
+    let previous: Option<String> = conn
         .query_row(
-            "SELECT 1 FROM workspace_files WHERE session_id = ?1 AND path = ?2",
+            "SELECT content FROM workspace_files WHERE session_id = ?1 AND path = ?2",
             params![session_id, path],
             |row| row.get(0),
         )
         .optional()
         .map_err(|e| e.to_string())?;
+    let (added, removed) = match &previous {
+        Some(before) => line_diff_stats(before, &content),
+        None => (content.lines().count(), 0),
+    };
     let now = now_millis();
     conn.execute(
         "INSERT INTO workspace_files (session_id, path, content, created_at, updated_at)
@@ -1211,7 +1247,11 @@ pub fn ws_write(
         params![session_id, path, content, now],
     )
     .map_err(|e| e.to_string())?;
-    Ok(if existed.is_some() { "update" } else { "create" }.to_string())
+    Ok(WriteStats {
+        operation: if previous.is_some() { "update" } else { "create" }.to_string(),
+        added: added as i64,
+        removed: removed as i64,
+    })
 }
 
 /// 按字面量替换工作区文件中的文本；replace_all 为 false 时要求唯一匹配
@@ -1223,7 +1263,7 @@ pub fn ws_edit(
     old_string: String,
     new_string: String,
     replace_all: bool,
-) -> Result<(), String> {
+) -> Result<EditStats, String> {
     let path = workspace_path(&path)?;
     if old_string.is_empty() {
         return Err("old_string must be a non-empty string".to_string());
@@ -1261,13 +1301,17 @@ pub fn ws_edit(
     if updated.len() > WORKSPACE_MAX_BYTES {
         return Err(format!("file content exceeds {WORKSPACE_MAX_BYTES} bytes"));
     }
+    let (added, removed) = line_diff_stats(&content, &updated);
     conn.execute(
         "UPDATE workspace_files SET content = ?3, updated_at = ?4
          WHERE session_id = ?1 AND path = ?2",
         params![session_id, path, updated, now_millis()],
     )
     .map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(EditStats {
+        added: added as i64,
+        removed: removed as i64,
+    })
 }
 
 #[cfg(test)]

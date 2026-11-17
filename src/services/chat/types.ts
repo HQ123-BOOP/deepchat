@@ -91,8 +91,12 @@ export type WorkspaceFilePart = {
   type: 'workspace_file'
   id: string
   path: string
-  operation: 'created' | 'updated'
-  chars: number
+  action?: 'create' | 'update' | 'edit'
+  added?: number
+  removed?: number
+  /** 早期消息的字段，保留用于兼容 */
+  operation?: 'created' | 'updated'
+  chars?: number
 }
 
 /** read 的窗口记录：附件或工作区文件读取了哪些行 */

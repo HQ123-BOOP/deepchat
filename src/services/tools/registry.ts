@@ -202,7 +202,12 @@ export type ToolRunResult = {
   /** 附件解析结果，供 UI 显示一行可点开的记录 */
   attachment?: AttachmentSummary
   /** write / edit 的产物，供 UI 显示文件卡片 */
-  workspace?: { path: string; operation: 'created' | 'updated'; chars: number }
+  workspace?: {
+    path: string
+    action: 'create' | 'update' | 'edit'
+    added: number
+    removed: number
+  }
   /** read 的窗口信息，供 UI 显示读取卡片 */
   read?: {
     kind: 'attachment' | 'workspace'
@@ -601,30 +606,35 @@ export const runTool = async (
     try {
       if (name === 'write') {
         const content = typeof args.content === 'string' ? args.content : ''
-        const operation = await writeWorkspaceFile(ctx.sessionId, filePath, content)
+        const result = await writeWorkspaceFile(ctx.sessionId, filePath, content)
         return {
           content: `<path>${filePath}</path>\n<type>file</type>\n<content>\n${
-            operation === 'create' ? 'Created' : 'Updated'
+            result.operation === 'create' ? 'Created' : 'Updated'
           } file\n</content>`,
           sources: [],
           workspace: {
             path: filePath,
-            operation: operation === 'create' ? 'created' : 'updated',
-            chars: content.length,
+            action: result.operation,
+            added: result.added,
+            removed: result.removed,
           },
         }
       }
       const oldString = typeof args.old_string === 'string' ? args.old_string : ''
       const newString = typeof args.new_string === 'string' ? args.new_string : ''
       const replaceAll = args.replace_all === true
-      await editWorkspaceFile(ctx.sessionId, filePath, oldString, newString, replaceAll)
-      const saved = (await readWorkspaceFile(ctx.sessionId, filePath)) ?? ''
+      const stats = await editWorkspaceFile(ctx.sessionId, filePath, oldString, newString, replaceAll)
       return {
         content: replaceAll
           ? `The file ${filePath} has been updated. All occurrences were successfully replaced.`
           : `The file ${filePath} has been updated successfully.`,
         sources: [],
-        workspace: { path: filePath, operation: 'updated', chars: saved.length },
+        workspace: {
+          path: filePath,
+          action: 'edit',
+          added: stats.added,
+          removed: stats.removed,
+        },
       }
     } catch (error) {
       throw toWorkspaceFailure(name, error)

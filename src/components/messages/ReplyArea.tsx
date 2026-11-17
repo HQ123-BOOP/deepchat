@@ -379,6 +379,14 @@ const WorkspaceRow = ({
 }) => {
   const t = useTranslate()
   const [text, setText] = useState<string | null>(null)
+  const action = step.action ?? (step.operation === 'created' ? 'create' : 'update')
+  const actionLabel = t(
+    action === 'create'
+      ? 'fileActionCreate'
+      : action === 'edit'
+        ? 'fileActionEdit'
+        : 'fileActionUpdate'
+  )
   const open = async () => {
     const next = await readWorkspaceFile(sessionId, step.path)
     if (next === null) {
@@ -395,13 +403,20 @@ const WorkspaceRow = ({
   return (
     <>
       <ToolRow icon={<IconFileOutline20 />} isLast={isLast}>
+        <span className={styles.fileAction}>{actionLabel}</span>
         <button type="button" className={styles.attachment} onClick={open}>
           {step.path}
         </button>
-        <span className={styles.attachmentMeta}>
-          {t(step.operation === 'created' ? 'workspaceCreated' : 'workspaceUpdated')} ·{' '}
-          {t('workspaceChars', { count: step.chars.toLocaleString() })}
-        </span>
+        {step.added !== undefined ? (
+          <span className={styles.fileDiff}>
+            <span className={styles.diffAdd}>+{step.added}</span>
+            <span className={styles.diffRemove}>-{step.removed ?? 0}</span>
+          </span>
+        ) : step.chars !== undefined ? (
+          <span className={styles.attachmentMeta}>
+            {t('workspaceChars', { count: step.chars.toLocaleString() })}
+          </span>
+        ) : null}
         <button type="button" className={styles.workspaceSave} onClick={save}>
           {t('workspaceSave')}
         </button>
@@ -439,6 +454,7 @@ const ReadFileRow = ({
   return (
     <>
       <ToolRow icon={<IconFileOutline20 />} isLast={isLast}>
+        <span className={styles.fileAction}>{t('fileActionRead')}</span>
         {step.kind === 'workspace' ? (
           <button type="button" className={styles.attachment} onClick={open}>
             {step.name}
@@ -447,7 +463,7 @@ const ReadFileRow = ({
           <span>{step.name}</span>
         )}
         <span className={styles.attachmentMeta}>
-          {t('fileReadRange', { from: step.from, to: step.to, total: step.total })}
+          L{step.from}-L{step.to}
         </span>
       </ToolRow>
       {text !== null ? (

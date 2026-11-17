@@ -28,6 +28,10 @@ declare const styles: {
   readonly "toolBody": string;
   readonly "attachment": string;
   readonly "attachmentMeta": string;
+  readonly "fileAction": string;
+  readonly "fileDiff": string;
+  readonly "diffAdd": string;
+  readonly "diffRemove": string;
   readonly "workspaceSave": string;
   readonly "intro": string;
   readonly "page": string;

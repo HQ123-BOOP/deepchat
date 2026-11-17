@@ -31,8 +31,20 @@ export const listWorkspaceFiles = (sessionId: string) =>
 export const readWorkspaceFile = (sessionId: string, path: string) =>
   invoke<string | null>('ws_read', { sessionId, path })
 
+export type WorkspaceWriteResult = {
+  operation: 'create' | 'update'
+  added: number
+  removed: number
+}
+
+/** 编辑结果的行级增删数 */
+export type WorkspaceEditResult = {
+  added: number
+  removed: number
+}
+
 export const writeWorkspaceFile = (sessionId: string, path: string, content: string) =>
-  invoke<'create' | 'update'>('ws_write', { sessionId, path, content })
+  invoke<WorkspaceWriteResult>('ws_write', { sessionId, path, content })
 
 export const editWorkspaceFile = (
   sessionId: string,
@@ -40,7 +52,7 @@ export const editWorkspaceFile = (
   oldString: string,
   newString: string,
   replaceAll: boolean
-) => invoke<null>('ws_edit', { sessionId, path, oldString, newString, replaceAll })
+) => invoke<WorkspaceEditResult>('ws_edit', { sessionId, path, oldString, newString, replaceAll })
 
 /**
  * 把工作区文件交给系统：能分享附件时走分享面板（Android 可存到「文件」），

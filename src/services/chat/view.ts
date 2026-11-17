@@ -89,8 +89,12 @@ export type WorkspaceStep = {
   type: 'workspace'
   key: string
   path: string
-  operation: 'created' | 'updated'
-  chars: number
+  action?: 'create' | 'update' | 'edit'
+  added?: number
+  removed?: number
+  /** 早期消息的字段，保留兼容 */
+  operation?: 'created' | 'updated'
+  chars?: number
 }
 
 /** 读取文件：显示读取范围，工作区文件可点开预览 */
@@ -327,6 +331,9 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
         type: 'workspace',
         key: block.id,
         path: block.path,
+        action: block.action,
+        added: block.added,
+        removed: block.removed,
         operation: block.operation,
         chars: block.chars,
       })

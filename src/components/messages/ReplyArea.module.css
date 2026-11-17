@@ -281,6 +281,26 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 工作区文件：动作标签与增删行数 */
+.fileAction {
+  margin-right: 6px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.fileDiff {
+  margin-left: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.diffAdd {
+  color: var(--dsw-static-green-500);
+}
+
+.diffRemove {
+  margin-left: 6px;
+  color: var(--dsw-static-red-400);
+}
+
 /* 工作区文件：保存到设备的小按钮 */
 .workspaceSave {
   height: 22px;
