@@ -301,27 +301,6 @@
   color: var(--dsw-static-red-400);
 }
 
-/* 工作区文件：保存到设备的小按钮 */
-.workspaceSave {
-  height: 22px;
-  margin-left: 10px;
-  padding: 0 8px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font: var(--dsw-font-xs-13);
-  cursor: pointer;
-  transition:
-    color 0.2s,
-    border-color 0.2s;
-}
-
-.workspaceSave:hover {
-  color: var(--dsw-alias-brand-primary);
-  border-color: var(--dsw-alias-brand-primary);
-}
-
 .intro {
   display: inline-block;
   margin-right: 6px;

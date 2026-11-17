@@ -8,9 +8,12 @@ import {
   IconChevronRightOutline14,
   IconCheckedOutline14,
   IconCloseFill14,
+  IconDownloadOutline16,
+  IconEditOutline16,
   IconFileOutline20,
   IconLinkOutline16,
   IconPaperclipOutline16,
+  IconPlusOutline16,
   IconRightUpOutline14,
   IconSearchOutline16,
   IconSearchWarningOutline16,
@@ -39,6 +42,7 @@ import {
   type WorkspaceStep,
 } from '../../services/chat/view.js'
 import { Tooltip } from '../base/Tooltip.js'
+import { IconButton } from '../base/IconButton.js'
 import { FileTextViewer } from '../files/FileTextViewer.js'
 import { WorkspaceFileViewer } from '../files/WorkspaceFileViewer.js'
 import { Markdown } from '../markdown/Markdown.js'
@@ -402,7 +406,18 @@ const WorkspaceRow = ({
   }
   return (
     <>
-      <ToolRow icon={<IconFileOutline20 />} isLast={isLast}>
+      <ToolRow
+        icon={
+          action === 'create' ? (
+            <IconPlusOutline16 />
+          ) : action === 'update' || action === 'edit' ? (
+            <IconEditOutline16 />
+          ) : (
+            <IconFileOutline20 />
+          )
+        }
+        isLast={isLast}
+      >
         <span className={styles.fileAction}>{actionLabel}</span>
         <button type="button" className={styles.attachment} onClick={open}>
           {step.path}
@@ -417,9 +432,12 @@ const WorkspaceRow = ({
             {t('workspaceChars', { count: step.chars.toLocaleString() })}
           </span>
         ) : null}
-        <button type="button" className={styles.workspaceSave} onClick={save}>
-          {t('workspaceSave')}
-        </button>
+        <IconButton
+          icon={<IconDownloadOutline16 />}
+          tooltip={t('workspaceSave')}
+          tooltipPlacement="bottom"
+          onClick={save}
+        />
       </ToolRow>
       {text !== null ? (
         <WorkspaceFileViewer name={step.path} text={text} onClose={() => setText(null)} />

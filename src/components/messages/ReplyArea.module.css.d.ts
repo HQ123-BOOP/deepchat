@@ -32,7 +32,6 @@ declare const styles: {
   readonly "fileDiff": string;
   readonly "diffAdd": string;
   readonly "diffRemove": string;
-  readonly "workspaceSave": string;
   readonly "intro": string;
   readonly "page": string;
   readonly "pageText": string;
