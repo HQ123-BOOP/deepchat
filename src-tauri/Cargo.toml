@@ -1,6 +1,6 @@
 [package]
 name = "chat-demo"
-version = "0.2.3"
+version = "0.2.4"
 description = "chat-demo desktop and mobile shell"
 authors = ["HQ123-BOOP"]
 edition = "2021"
