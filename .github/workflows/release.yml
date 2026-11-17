@@ -118,19 +118,24 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-
-      # compileSdk/targetSdk = 37，runner 默认不带这个 platform，显式补齐。
+      # ubuntu runner 自带 Android SDK，但 setup-android@v3 会尝试安装已废弃的 "tools" 包而失败，
+      # 所以直接用预装的 sdkmanager 补齐 compileSdk=37 需要的 platform、build-tools 与 NDK。
       - name: Install Android SDK components
         run: |
-          set -euo pipefail
-          yes | sdkmanager --install \
+          set -eu
+          sdk="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          sdkmanager="$(command -v sdkmanager || echo "$sdk/cmdline-tools/latest/bin/sdkmanager")"
+          yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+          yes | "$sdkmanager" --install \
             "platforms;android-37.0" \
             "build-tools;36.0.0" \
-            "ndk;27.3.13750724" >/dev/null 2>&1
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
+            "ndk;27.3.13750724" >/dev/null 2>&1 || true
+          test -d "$sdk/platforms/android-37.0"
+          test -d "$sdk/ndk/27.3.13750724"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$sdk/ndk/27.3.13750724" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$sdk/ndk/27.3.13750724" >> "$GITHUB_ENV"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
