@@ -17,4 +17,4 @@ GitHub
 
 ## License
 
-[MIT](LICENSE). The build copies the license to `dist/LICENSE`; include it when distributing the app. Third-party dependencies are subject to their own licenses. AS IS
+[Apache-2.0](LICENSE). The build copies the license to `dist/LICENSE`; include it when distributing the app. Third-party dependencies are subject to their own licenses. AS IS
