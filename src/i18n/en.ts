@@ -77,6 +77,7 @@ export const en = {
   toolFindIntro: 'Find keyword',
   toolFindFailTooltip: 'No related content found',
   readingLink: 'Reading',
+  readLink: 'Read link',
   commonNetworkErrorToast: 'Network Error. Please check your network status.',
   replyInvalidApiKey:
     'The API Key is invalid or has been deleted. Please replace it and try again.',
