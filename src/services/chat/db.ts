@@ -62,8 +62,9 @@ const toDbFile = async (file: { id: string; blob: Blob }) => {
   return { id: file.id, mime: file.blob.type, data: bytesToBase64(bytes) }
 }
 
-const toSessionSummaryOf = (value: unknown): SessionSummary => {
-  const item = value as SessionSummary
+/** Rust 侧返回的是摘要 JSON 文本，这里解析成列表项 */
+const toSessionSummaryOf = (value: string): SessionSummary => {
+  const item = JSON.parse(value) as SessionSummary
   return {
     id: item.id,
     title: item.title,
