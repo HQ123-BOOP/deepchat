@@ -54,11 +54,35 @@ export const editWorkspaceFile = (
   replaceAll: boolean
 ) => invoke<WorkspaceEditResult>('ws_edit', { sessionId, path, oldString, newString, replaceAll })
 
+/** Android 原生写入桥：WebView 不处理 blob 下载，交给 MediaStore 写系统下载目录 */
+type AndroidFileBridge = {
+  saveFile?: (name: string, content: string) => string
+}
+
+const saveViaAndroid = (name: string, text: string): boolean => {
+  const bridge = (window as unknown as { AndroidFile?: AndroidFileBridge }).AndroidFile
+  if (!bridge?.saveFile) {
+    return false
+  }
+  try {
+    return bridge.saveFile(name, text) !== ''
+  } catch {
+    return false
+  }
+}
+
 /**
- * 保存工作区文件：优先由原生写到系统下载目录（WebView 的 blob 下载不可靠），
- * 失败时退回分享面板或浏览器下载。
+ * 保存工作区文件：优先由原生写到系统下载目录，失败时退回分享面板或浏览器下载。
  */
 export const saveWorkspaceFile = async (sessionId: string, path: string): Promise<boolean> => {
+  const text = await readWorkspaceFile(sessionId, path)
+  if (text === null) {
+    return false
+  }
+  const name = path.split('/').pop() || 'file.txt'
+  if (saveViaAndroid(name, text)) {
+    return true
+  }
   if (getInternals()) {
     try {
       await invoke<string>('ws_export', { sessionId, path })
@@ -67,11 +91,6 @@ export const saveWorkspaceFile = async (sessionId: string, path: string): Promis
       // 原生导出失败时继续尝试下面的分享与下载
     }
   }
-  const text = await readWorkspaceFile(sessionId, path)
-  if (text === null) {
-    return false
-  }
-  const name = path.split('/').pop() || 'file.txt'
   const file = new File([text], name, { type: 'text/plain;charset=utf-8' })
   const shareNavigator = navigator as Navigator & {
     canShare?: (data: ShareData) => boolean

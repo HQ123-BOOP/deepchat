@@ -1,11 +1,16 @@
 import { useTranslate } from '../../i18n/index.js'
 import { useState } from 'react'
-import { IconDownloadOutline16 } from '../base/icons.js'
+import { IconDownloadOutline16, IconEllipsisOutline16, IconFileOutline20 } from '../base/icons.js'
+import { Menu } from '../base/Menu.js'
 import { readWorkspaceFile, saveWorkspaceFile } from '../../services/workspace.js'
 import { showToast } from '../base/toastState.js'
 import { WorkspaceFileViewer } from '../files/WorkspaceFileViewer.js'
+import { WorkspacePreviewViewer } from '../files/WorkspacePreviewViewer.js'
 import type { PresentedFile } from '../../services/chat/types.js'
 import styles from './PresentedFiles.module.css'
+
+/** 可以直接渲染预览的文件类型；其余文件点击查看源码 */
+const PREVIEWABLE = new Set(['svg', 'html', 'htm'])
 
 const filename = (path: string) => path.split('/').pop() || path
 
@@ -15,7 +20,9 @@ const extension = (path: string) => {
   return index > 0 ? name.slice(index + 1).toUpperCase() : ''
 }
 
-/** 模型声明的交付文件：点击卡片预览，右侧按钮保存到设备 */
+const isPreviewable = (path: string) => PREVIEWABLE.has(extension(path).toLowerCase())
+
+/** 模型声明的交付文件：HTML / SVG 点击直接预览，三个点里可查看源码 */
 export const PresentedFiles = ({
   sessionId,
   files,
@@ -24,17 +31,21 @@ export const PresentedFiles = ({
   files: PresentedFile[]
 }) => {
   const t = useTranslate()
-  const [preview, setPreview] = useState<{ name: string; text: string } | null>(null)
+  const [viewer, setViewer] = useState<{
+    name: string
+    text: string
+    source: boolean
+  } | null>(null)
   if (files.length === 0) {
     return null
   }
-  const open = async (file: PresentedFile) => {
+  const open = async (file: PresentedFile, source: boolean) => {
     const text = await readWorkspaceFile(sessionId, file.path)
     if (text === null) {
       showToast({ key: 'workspaceMissing' })
       return
     }
-    setPreview({ name: file.path, text })
+    setViewer({ name: file.path, text, source })
   }
   const save = async (file: PresentedFile) => {
     if (await saveWorkspaceFile(sessionId, file.path)) {
@@ -53,7 +64,7 @@ export const PresentedFiles = ({
               className={styles.card}
               title={file.path}
               aria-label={file.path}
-              onClick={() => void open(file)}
+              onClick={() => void open(file, !isPreviewable(file.path))}
             />
             <span className={styles.icon} aria-hidden="true">
               {extension(file.path) || t('presentedFile')}
@@ -64,24 +75,58 @@ export const PresentedFiles = ({
                 {file.description || extension(file.path) || t('presentedFile')}
               </span>
             </div>
-            <button
-              type="button"
-              className={styles.action}
-              title={t('workspaceSave')}
-              aria-label={t('workspaceSave')}
-              onClick={() => void save(file)}
-            >
-              <IconDownloadOutline16 />
-            </button>
+            <div className={styles.actions}>
+              {isPreviewable(file.path) ? (
+                <Menu
+                  options={[
+                    {
+                      key: 'source',
+                      label: t('presentedShowSource'),
+                      icon: <IconFileOutline20 />,
+                      onSelect: () => void open(file, true),
+                    },
+                  ]}
+                >
+                  {({ toggle }) => (
+                    <button
+                      type="button"
+                      className={styles.action}
+                      title={t('presentedShowSource')}
+                      aria-label={t('presentedShowSource')}
+                      onClick={toggle}
+                    >
+                      <IconEllipsisOutline16 />
+                    </button>
+                  )}
+                </Menu>
+              ) : null}
+              <button
+                type="button"
+                className={styles.action}
+                title={t('workspaceSave')}
+                aria-label={t('workspaceSave')}
+                onClick={() => void save(file)}
+              >
+                <IconDownloadOutline16 />
+              </button>
+            </div>
           </div>
         ))}
       </div>
-      {preview ? (
-        <WorkspaceFileViewer
-          name={preview.name}
-          text={preview.text}
-          onClose={() => setPreview(null)}
-        />
+      {viewer ? (
+        viewer.source ? (
+          <WorkspaceFileViewer
+            name={viewer.name}
+            text={viewer.text}
+            onClose={() => setViewer(null)}
+          />
+        ) : (
+          <WorkspacePreviewViewer
+            name={viewer.name}
+            text={viewer.text}
+            onClose={() => setViewer(null)}
+          />
+        )
       ) : null}
     </>
   )

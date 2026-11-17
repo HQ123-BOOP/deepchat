@@ -2,6 +2,7 @@ package com.hq123boop.chatdemo
 
 import android.Manifest
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -9,6 +10,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.MediaStore
 import android.util.Base64
 import android.util.Size
@@ -23,6 +25,8 @@ import androidx.core.view.WindowInsetsCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
 import kotlin.concurrent.thread
 
 class MainActivity : TauriActivity() {
@@ -57,6 +61,8 @@ class MainActivity : TauriActivity() {
     webView.addJavascriptInterface(ThemeBridge(), "AndroidTheme")
     // 最近照片与外部链接：在原生侧读取相册，避免 WebView 跳转后丢失页面状态
     webView.addJavascriptInterface(MediaBridge(), "AndroidMedia")
+    // 工作区文件下载：WebView 不支持 blob 下载，直接写入系统「下载」目录
+    webView.addJavascriptInterface(FileBridge(), "AndroidFile")
   }
 
   private fun mediaPermission(): String =
@@ -236,6 +242,51 @@ class MainActivity : TauriActivity() {
           isAppearanceLightStatusBars = !dark
           isAppearanceLightNavigationBars = !dark
         }
+      }
+    }
+  }
+
+  /** 写入系统「下载」目录；Android 10+ 走 MediaStore，旧版本退回应用专属下载目录 */
+  private fun saveToDownloads(name: String, content: String): String {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      val values = ContentValues().apply {
+        put(MediaStore.Downloads.DISPLAY_NAME, name)
+        put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+        put(MediaStore.Downloads.IS_PENDING, 1)
+      }
+      val resolver = contentResolver
+      val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return ""
+      try {
+        val stream = resolver.openOutputStream(uri) ?: return ""
+        stream.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+        values.clear()
+        values.put(MediaStore.Downloads.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+        return uri.toString()
+      } catch (error: Exception) {
+        resolver.delete(uri, null, null)
+        throw error
+      }
+    }
+    val dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: filesDir
+    if (!dir.exists()) {
+      dir.mkdirs()
+    }
+    val file = File(dir, name)
+    FileOutputStream(file).use { it.write(content.toByteArray(Charsets.UTF_8)) }
+    return file.absolutePath
+  }
+
+  inner class FileBridge {
+    @JavascriptInterface
+    fun saveFile(name: String, content: String): String {
+      if (!isAppPage()) {
+        return ""
+      }
+      return try {
+        saveToDownloads(name, content)
+      } catch (_: Exception) {
+        ""
       }
     }
   }

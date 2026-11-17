@@ -98,6 +98,15 @@
   white-space: nowrap;
 }
 
+.actions {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
 .action {
   position: relative;
   z-index: 2;
