@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - 'v*'
+  # 允许对已有 tag 重跑发布（例如补齐缺失的产物），不需要重新打 tag。
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要重新发布的 tag，例如 v0.2.2'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -36,7 +43,7 @@ jobs:
       - name: Resolve version from tag
         id: meta
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           version="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -45,7 +52,7 @@ jobs:
 
       - name: Generate release notes
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node .github/scripts/release-notes.mjs "$TAG" > release-notes.md
 
