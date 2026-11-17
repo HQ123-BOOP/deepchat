@@ -8,6 +8,7 @@ import {
   IconChevronRightOutline14,
   IconCheckedOutline14,
   IconCloseFill14,
+  IconFileOutline20,
   IconLinkOutline16,
   IconPaperclipOutline16,
   IconRightUpOutline14,
@@ -17,6 +18,8 @@ import {
   IconWarningOutline16,
 } from '../base/icons.js'
 import { loadFileText, type StoredFileText } from '../../services/chat/db.js'
+import { readWorkspaceFile, saveWorkspaceFile } from '../../services/workspace.js'
+import { showToast } from '../base/toastState.js'
 import type { AssistantMessage } from '../../services/chat/types.js'
 import {
   getAreaTitle,
@@ -32,9 +35,11 @@ import {
   type Source,
   type Step,
   type ToolErrorStep,
+  type WorkspaceStep,
 } from '../../services/chat/view.js'
 import { Tooltip } from '../base/Tooltip.js'
 import { FileTextViewer } from '../files/FileTextViewer.js'
+import { WorkspaceFileViewer } from '../files/WorkspaceFileViewer.js'
 import { Markdown } from '../markdown/Markdown.js'
 import { SiteThumbnails } from '../search/SiteLogo.js'
 import { toggleSearchPanel, useSearchPanel } from '../search/searchPanelState.js'
@@ -60,11 +65,13 @@ const useTicker = (active: boolean, interval: number) => {
  * 未开启时只有工具步骤（如普通搜索的「已阅读 N 个网页」）。
  */
 export const ReplyArea = memo(function ReplyArea({
+  sessionId,
   message,
   view,
   streaming,
   hasResponse,
 }: {
+  sessionId: string
   message: AssistantMessage
   view: ReplyView
   streaming: boolean
@@ -101,6 +108,7 @@ export const ReplyArea = memo(function ReplyArea({
             <StepItem
               key={stepKey(step)}
               step={step}
+              sessionId={sessionId}
               message={message}
               sources={view.sources}
               streaming={streaming}
@@ -118,12 +126,14 @@ const stepKey = (step: Step) => step.key
 
 const StepItem = ({
   step,
+  sessionId,
   message,
   sources,
   streaming,
   isLast,
 }: {
   step: Step
+  sessionId: string
   message: AssistantMessage
   sources: Source[]
   streaming: boolean
@@ -174,6 +184,8 @@ const StepItem = ({
       )
     case 'attachment':
       return <AttachmentRow step={step} isLast={isLast} />
+    case 'workspace':
+      return <WorkspaceRow step={step} sessionId={sessionId} isLast={isLast} />
     default:
       return null
   }
@@ -194,6 +206,12 @@ const toolErrorText = (step: ToolErrorStep, t: Translate): string => {
   }
   if (step.tool === 'read') {
     return t(step.code === 'invalid_arguments' ? 'toolReadFileInvalid' : 'toolReadFileFailed')
+  }
+  if (step.tool === 'write') {
+    return t(step.code === 'invalid_arguments' ? 'toolWriteInvalid' : 'toolWriteFailed')
+  }
+  if (step.tool === 'edit') {
+    return t(step.code === 'invalid_arguments' ? 'toolEditInvalid' : 'toolEditFailed')
   }
   return t('toolSearchFail')
 }
@@ -342,6 +360,52 @@ const AttachmentRow = ({ step, isLast }: { step: AttachmentStep; isLast: boolean
         )}
       </ToolRow>
       {doc ? <FileTextViewer doc={doc} onClose={() => setDoc(null)} /> : null}
+    </>
+  )
+}
+
+/** write / edit 产物：一行文件记录，点开预览，可保存到设备 */
+const WorkspaceRow = ({
+  step,
+  sessionId,
+  isLast,
+}: {
+  step: WorkspaceStep
+  sessionId: string
+  isLast: boolean
+}) => {
+  const t = useTranslate()
+  const [text, setText] = useState<string | null>(null)
+  const open = async () => {
+    const next = await readWorkspaceFile(sessionId, step.path)
+    if (next === null) {
+      showToast({ key: 'workspaceMissing' })
+      return
+    }
+    setText(next)
+  }
+  const save = async () => {
+    if (!(await saveWorkspaceFile(sessionId, step.path))) {
+      showToast({ key: 'workspaceSaveFailed' })
+    }
+  }
+  return (
+    <>
+      <ToolRow icon={<IconFileOutline20 />} isLast={isLast}>
+        <button type="button" className={styles.attachment} onClick={open}>
+          {step.path}
+        </button>
+        <span className={styles.attachmentMeta}>
+          {t(step.operation === 'created' ? 'workspaceCreated' : 'workspaceUpdated')} ·{' '}
+          {t('workspaceChars', { count: step.chars.toLocaleString() })}
+        </span>
+        <button type="button" className={styles.workspaceSave} onClick={save}>
+          {t('workspaceSave')}
+        </button>
+      </ToolRow>
+      {text !== null ? (
+        <WorkspaceFileViewer name={step.path} text={text} onClose={() => setText(null)} />
+      ) : null}
     </>
   )
 }

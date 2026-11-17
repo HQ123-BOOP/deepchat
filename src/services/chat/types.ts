@@ -86,12 +86,22 @@ export type AttachmentParsePart = {
   chars: number
 }
 
+/** write / edit 的工作区产物：文件本体在 SQLite 工作区里，这里只记录展示信息 */
+export type WorkspaceFilePart = {
+  type: 'workspace_file'
+  id: string
+  path: string
+  operation: 'created' | 'updated'
+  chars: number
+}
+
 export type ReplyBlock =
   | ThinkingPart
   | TextPart
   | ServerToolBlock
   | ToolErrorPart
   | AttachmentParsePart
+  | WorkspaceFilePart
 
 /** 一次本地工具调用回给模型的结果；content 是当时完整的工具输出 */
 export type ToolTraceResult = {

@@ -58,6 +58,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     <div className={styles.message}>
       {refused ? null : (
         <ReplyArea
+          sessionId={sessionId}
           message={message}
           view={view}
           streaming={streaming}

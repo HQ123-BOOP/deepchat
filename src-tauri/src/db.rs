@@ -72,6 +72,15 @@ CREATE TABLE IF NOT EXISTS files_staging (
   mime TEXT NOT NULL DEFAULT '',
   bytes BLOB NOT NULL
 );
+-- 模型在应用内工作区生成或修改的文本文件；按会话隔离，不触碰系统文件
+CREATE TABLE IF NOT EXISTS workspace_files (
+  session_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (session_id, path)
+);
 CREATE INDEX IF NOT EXISTS idx_summaries_updated ON session_summaries (updated_at DESC, id DESC);
 ";
 
@@ -596,6 +605,8 @@ pub fn db_delete_session(db: State<'_, Db>, id: String) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM file_refs WHERE session_id = ?1", params![id])
         .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM workspace_files WHERE session_id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
     if let Some(summary) = summary {
         let value: serde_json::Value = serde_json::from_str(&summary).map_err(|e| e.to_string())?;
         if let Some(ids) = value.get("fileIds").and_then(|v| v.as_array()) {
@@ -870,6 +881,181 @@ pub fn db_search(db: State<'_, Db>, query: String) -> Result<Vec<SearchHit>, Str
         .collect();
     hits.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     Ok(hits)
+}
+
+/// 单个会话内模型可写的文本工作区；上限按 UTF-8 字节计
+const WORKSPACE_MAX_BYTES: usize = 512 * 1024;
+
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_millis() as i64)
+        .unwrap_or_default()
+}
+
+/// 归一化模型给出的工作区相对路径：只允许应用内路径，拒绝绝对路径、`..` 与控制字符。
+fn workspace_path(raw: &str) -> Result<String, String> {
+    if raw.contains('\0') {
+        return Err("file_path contains an invalid character".to_string());
+    }
+    let normalized = raw.replace('\\', "/");
+    if normalized.starts_with('/') {
+        return Err("file_path must stay inside the app workspace".to_string());
+    }
+    let mut parts: Vec<&str> = Vec::new();
+    for part in normalized.split('/') {
+        match part {
+            "" | "." => continue,
+            ".." => return Err("file_path must stay inside the app workspace".to_string()),
+            _ => parts.push(part),
+        }
+    }
+    let path = parts.join("/");
+    if path.is_empty() {
+        return Err("file_path must be a non-empty string".to_string());
+    }
+    if path.len() > 512 {
+        return Err("file_path is too long".to_string());
+    }
+    Ok(path)
+}
+
+#[derive(Serialize)]
+pub struct WorkspaceEntry {
+    path: String,
+    size: i64,
+    updated_at: i64,
+}
+
+/// 列出会话工作区里的全部文件，最近修改的在前
+#[tauri::command]
+pub fn ws_list(db: State<'_, Db>, session_id: String) -> Result<Vec<WorkspaceEntry>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT path, length(content), updated_at FROM workspace_files
+             WHERE session_id = ?1
+             ORDER BY updated_at DESC, path",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![session_id], |row| {
+            Ok(WorkspaceEntry {
+                path: row.get(0)?,
+                size: row.get(1)?,
+                updated_at: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// 读取工作区文件；不存在时返回 null
+#[tauri::command]
+pub fn ws_read(
+    db: State<'_, Db>,
+    session_id: String,
+    path: String,
+) -> Result<Option<String>, String> {
+    let path = workspace_path(&path)?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT content FROM workspace_files WHERE session_id = ?1 AND path = ?2",
+        params![session_id, path],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// 新建或整体覆盖工作区文件，返回 create / update
+#[tauri::command]
+pub fn ws_write(
+    db: State<'_, Db>,
+    session_id: String,
+    path: String,
+    content: String,
+) -> Result<String, String> {
+    let path = workspace_path(&path)?;
+    if content.len() > WORKSPACE_MAX_BYTES {
+        return Err(format!("file content exceeds {WORKSPACE_MAX_BYTES} bytes"));
+    }
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let existed: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM workspace_files WHERE session_id = ?1 AND path = ?2",
+            params![session_id, path],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let now = now_millis();
+    conn.execute(
+        "INSERT INTO workspace_files (session_id, path, content, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?4)
+         ON CONFLICT(session_id, path) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at",
+        params![session_id, path, content, now],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(if existed.is_some() { "update" } else { "create" }.to_string())
+}
+
+/// 按字面量替换工作区文件中的文本；replace_all 为 false 时要求唯一匹配
+#[tauri::command]
+pub fn ws_edit(
+    db: State<'_, Db>,
+    session_id: String,
+    path: String,
+    old_string: String,
+    new_string: String,
+    replace_all: bool,
+) -> Result<(), String> {
+    let path = workspace_path(&path)?;
+    if old_string.is_empty() {
+        return Err("old_string must be a non-empty string".to_string());
+    }
+    if old_string == new_string {
+        return Err("old_string and new_string must differ".to_string());
+    }
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let content: Option<String> = conn
+        .query_row(
+            "SELECT content FROM workspace_files WHERE session_id = ?1 AND path = ?2",
+            params![session_id, path],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some(content) = content else {
+        return Err(format!("file not found: {path}"));
+    };
+    let matches = content.matches(old_string.as_str()).count();
+    if matches == 0 {
+        return Err(format!("old_string was not found in {path}"));
+    }
+    // 多处匹配时必须显式要求全量替换，避免模型改错位置
+    if matches > 1 && !replace_all {
+        return Err(format!(
+            "old_string appears {matches} times in {path}; add more context or set replace_all to true"
+        ));
+    }
+    let updated = if replace_all {
+        content.replace(old_string.as_str(), new_string.as_str())
+    } else {
+        content.replacen(old_string.as_str(), new_string.as_str(), 1)
+    };
+    if updated.len() > WORKSPACE_MAX_BYTES {
+        return Err(format!("file content exceeds {WORKSPACE_MAX_BYTES} bytes"));
+    }
+    conn.execute(
+        "UPDATE workspace_files SET content = ?3, updated_at = ?4
+         WHERE session_id = ?1 AND path = ?2",
+        params![session_id, path, updated, now_millis()],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[cfg(test)]

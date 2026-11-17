@@ -28,6 +28,7 @@ declare const styles: {
   readonly "toolBody": string;
   readonly "attachment": string;
   readonly "attachmentMeta": string;
+  readonly "workspaceSave": string;
   readonly "intro": string;
   readonly "page": string;
   readonly "pageText": string;

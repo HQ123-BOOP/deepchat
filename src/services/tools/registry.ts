@@ -14,7 +14,7 @@ import {
   type SearchResult,
 } from './deepseekTools.js'
 import type { JsonSchema, ToolSchema } from '../providers/types.js'
-
+import { editWorkspaceFile, readWorkspaceFile, writeWorkspaceFile } from '../workspace.js'
 export type ToolName = 'web_search' | 'read_url' | 'ocr_file' | 'read'
 
 /** 联网开关打开时才声明 */
@@ -85,15 +85,22 @@ export const OCR_TOOL_SCHEMA: ToolSchema = {
   } satisfies JsonSchema,
 }
 
-/** 只在有文本需要分页读取时才有意义；与 ocr_file 一起声明 */
+/** 读取附件或工作区文件；两者都存在时才需要分页 */
 export const READ_TOOL_SCHEMA: ToolSchema = {
   name: 'read',
   description:
-    'Read an attachment as line-numbered text. Plain-text uploads are read directly; documents and images must be parsed with ocr_file first. Use offset and limit to continue a long document.',
+    'Read an attachment or a workspace file as line-numbered text. Plain-text uploads and files created with write are read directly; documents and images must be parsed with ocr_file first. Use offset and limit to continue a long file.',
   parameters: {
     type: 'object',
     properties: {
-      file_id: { type: 'string', description: 'The attachment file_id from the user message.' },
+      file_id: {
+        type: 'string',
+        description: 'The attachment file_id from the user message. Omit when reading a workspace file.',
+      },
+      file_path: {
+        type: 'string',
+        description: 'Workspace-relative path, e.g. "notes/report.md". Omit when reading an attachment.',
+      },
       offset: {
         type: 'integer',
         description: '1-based first line to return. Defaults to 1.',
@@ -106,7 +113,55 @@ export const READ_TOOL_SCHEMA: ToolSchema = {
         maximum: READ_LIMIT,
       },
     },
-    required: ['file_id'],
+    additionalProperties: false,
+  } satisfies JsonSchema,
+}
+
+/** 模型可用的文件工具：只写应用内工作区，不接触系统文件 */
+export const WRITE_TOOL_SCHEMA: ToolSchema = {
+  name: 'write',
+  description: 'Create or fully replace a UTF-8 text file in the app workspace.',
+  parameters: {
+    type: 'object',
+    properties: {
+      file_path: {
+        type: 'string',
+        description:
+          'Workspace-relative path to write, e.g. "notes/report.md". Provide file_path before content.',
+      },
+      content: {
+        type: 'string',
+        description: 'Full UTF-8 text content to write. Use an empty string to create an empty file.',
+      },
+    },
+    required: ['file_path', 'content'],
+    additionalProperties: false,
+  } satisfies JsonSchema,
+}
+
+export const EDIT_TOOL_SCHEMA: ToolSchema = {
+  name: 'edit',
+  description: 'Edit an existing UTF-8 text file in the app workspace by replacing literal text.',
+  parameters: {
+    type: 'object',
+    properties: {
+      file_path: {
+        type: 'string',
+        description:
+          'Workspace-relative path to edit. Provide file_path before old_string and new_string.',
+      },
+      old_string: { type: 'string', description: 'Literal text to replace.' },
+      new_string: {
+        type: 'string',
+        description: 'Literal replacement text. Use an empty string to delete the match.',
+      },
+      replace_all: {
+        type: 'boolean',
+        description:
+          'Replace all matches. Defaults to false; when false, old_string must appear exactly once.',
+      },
+    },
+    required: ['file_path', 'old_string', 'new_string'],
     additionalProperties: false,
   } satisfies JsonSchema,
 }
@@ -116,6 +171,8 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
   ...WEB_TOOL_SCHEMAS,
   OCR_TOOL_SCHEMA,
   READ_TOOL_SCHEMA,
+  WRITE_TOOL_SCHEMA,
+  EDIT_TOOL_SCHEMA,
 ]
 
 /** 一份落盘的 OCR 结果 */
@@ -144,6 +201,8 @@ export type ToolRunResult = {
   sources: ToolSource[]
   /** 附件解析结果，供 UI 显示一行可点开的记录 */
   attachment?: AttachmentSummary
+  /** write / edit 的产物，供 UI 显示文件卡片 */
+  workspace?: { path: string; operation: 'created' | 'updated'; chars: number }
 }
 
 /** UI 展示解析结果所需的元数据，不含全文 */
@@ -331,6 +390,8 @@ const toSource = (result: SearchResult): ToolSource => ({
 
 export type ToolContext = {
   apiKey: string
+  /** 会话 id：write / edit 的工作区按会话隔离 */
+  sessionId: string
   /** 按附件本地 id 取回原件；tool call 只能传 JSON 文本，二进制从这里取 */
   loadFile: (id: string) => Promise<Blob | undefined>
   /** 保存 OCR 全文，供 read 与 UI 共用 */
@@ -352,6 +413,13 @@ const positiveInteger = (name: string, value: unknown): number | undefined => {
     throw new ToolFailure('read', 'invalid_arguments', `${name} must be a positive integer`)
   }
   return parsed
+}
+
+/** Tauri 命令以字符串拒绝；按内容区分「文件不存在」与其他参数错误 */
+const toWorkspaceFailure = (tool: string, error: unknown): ToolFailure => {
+  const message =
+    typeof error === 'string' ? error : error instanceof Error ? error.message : String(error)
+  return new ToolFailure(tool, /file not found/i.test(message) ? 'not_found' : 'invalid_arguments', message)
 }
 
 /** 执行一次工具调用；未知工具或参数非法时抛错，由调用方决定如何回填 */
@@ -444,9 +512,14 @@ export const runTool = async (
     }
   }
   if (name === 'read') {
-    const id = typeof args.file_id === 'string' ? args.file_id.trim() : ''
-    if (!id) {
-      throw new ToolFailure('read', 'invalid_arguments', 'file_id must be a non-empty string')
+    const fileId = typeof args.file_id === 'string' ? args.file_id.trim() : ''
+    const filePath = typeof args.file_path === 'string' ? args.file_path.trim() : ''
+    if ((fileId === '') === (filePath === '')) {
+      throw new ToolFailure(
+        'read',
+        'invalid_arguments',
+        'provide exactly one of file_id or file_path'
+      )
     }
     const offset = positiveInteger('offset', args.offset) ?? 1
     const limit = positiveInteger('limit', args.limit) ?? READ_LIMIT
@@ -457,18 +530,62 @@ export const runTool = async (
         `limit must be less than or equal to ${READ_LIMIT}`
       )
     }
-    const doc = await ctx.loadFileText?.(id)
-    const fileName = doc?.name ?? ctx.fileNames?.[id] ?? id
-    // OCR 结果优先；没有解析记录时，纯文本附件直接按原文读取
-    const text = doc?.text ?? (await loadPlainText(ctx, id))
+    // 工作区文件直接按行读取，附件则先取 OCR 结果、再退回纯文本原件
+    if (filePath) {
+      const text = await readWorkspaceFile(ctx.sessionId, filePath)
+      if (text === null) {
+        throw new ToolFailure('read', 'not_found', `file not found: ${filePath}`)
+      }
+      return { content: formatReadWindow(filePath, text, offset, limit), sources: [] }
+    }
+    const doc = await ctx.loadFileText?.(fileId)
+    const fileName = doc?.name ?? ctx.fileNames?.[fileId] ?? fileId
+    const text = doc?.text ?? (await loadPlainText(ctx, fileId))
     if (text === undefined) {
       throw new ToolFailure(
         'read',
         'invalid_arguments',
-        `attachment "${fileName}" is not plain text; call ocr_file with file_id "${id}" first`
+        `attachment "${fileName}" is not plain text; call ocr_file with file_id "${fileId}" first`
       )
     }
     return { content: formatReadWindow(fileName, text, offset, limit), sources: [] }
   }
-  throw new ToolFailure(name, 'unknown_tool', `未知工具：${name}`)
+  if (name === 'write' || name === 'edit') {
+    const filePath = typeof args.file_path === 'string' ? args.file_path.trim() : ''
+    if (!filePath) {
+      throw new ToolFailure(name, 'invalid_arguments', 'file_path must be a non-empty string')
+    }
+    try {
+      if (name === 'write') {
+        const content = typeof args.content === 'string' ? args.content : ''
+        const operation = await writeWorkspaceFile(ctx.sessionId, filePath, content)
+        return {
+          content: `<path>${filePath}</path>\n<type>file</type>\n<content>\n${
+            operation === 'create' ? 'Created' : 'Updated'
+          } file\n</content>`,
+          sources: [],
+          workspace: {
+            path: filePath,
+            operation: operation === 'create' ? 'created' : 'updated',
+            chars: content.length,
+          },
+        }
+      }
+      const oldString = typeof args.old_string === 'string' ? args.old_string : ''
+      const newString = typeof args.new_string === 'string' ? args.new_string : ''
+      const replaceAll = args.replace_all === true
+      await editWorkspaceFile(ctx.sessionId, filePath, oldString, newString, replaceAll)
+      const saved = (await readWorkspaceFile(ctx.sessionId, filePath)) ?? ''
+      return {
+        content: replaceAll
+          ? `The file ${filePath} has been updated. All occurrences were successfully replaced.`
+          : `The file ${filePath} has been updated successfully.`,
+        sources: [],
+        workspace: { path: filePath, operation: 'updated', chars: saved.length },
+      }
+    } catch (error) {
+      throw toWorkspaceFailure(name, error)
+    }
+  }
+  throw new ToolFailure(name, 'unknown_tool', `Unknown tool: ${name}`)
 }

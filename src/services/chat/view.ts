@@ -84,6 +84,15 @@ export type AttachmentStep = {
   chars: number
 }
 
+/** 工作区文件：write / edit 的产物，一行记录，可点开预览或保存到本地 */
+export type WorkspaceStep = {
+  type: 'workspace'
+  key: string
+  path: string
+  operation: 'created' | 'updated'
+  chars: number
+}
+
 export type ThinkingStep = { type: 'thinking'; key: string; blocks: ThinkingPart[] }
 
 /** 工具调用前输出的说明文字 */
@@ -98,6 +107,7 @@ export type Step =
   | PreambleStep
   | ToolErrorStep
   | AttachmentStep
+  | WorkspaceStep
 
 export type ReplyView = {
   steps: Step[]
@@ -294,6 +304,17 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
         name: block.name,
         status: block.status,
         pages: block.pages,
+        chars: block.chars,
+      })
+      return
+    }
+    if (block.type === 'workspace_file') {
+      flushPreamble()
+      steps.push({
+        type: 'workspace',
+        key: block.id,
+        path: block.path,
+        operation: block.operation,
         chars: block.chars,
       })
       return

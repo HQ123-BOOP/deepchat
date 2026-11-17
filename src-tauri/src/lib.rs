@@ -57,7 +57,11 @@ pub fn run() {
             db::db_save_staging_files,
             db::db_update_staging_file_types,
             db::db_commit_staging,
-            db::db_search
+            db::db_search,
+            db::ws_list,
+            db::ws_read,
+            db::ws_write,
+            db::ws_edit
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

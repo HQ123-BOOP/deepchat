@@ -37,6 +37,8 @@ export type AgentEvent =
       failure?: { code: ToolFailureCode; tool: string; status: number }
       /** 附件解析结果，供 UI 显示一行可点开的记录 */
       attachment?: AttachmentSummary
+      /** write / edit 的产物，供 UI 显示文件卡片 */
+      workspace?: { path: string; operation: 'created' | 'updated'; chars: number }
     }
   /**
    * 本轮产生的原始 function call 消息：assistant 工具调用与对应的 tool 结果。
@@ -52,6 +54,8 @@ export type AgentOptions = {
   messages: ProviderMessage[]
   /** 本轮声明给模型的工具；由联网开关与本轮附件决定 */
   tools?: ToolSchema[]
+  /** 会话 id：write / edit 的工作区按会话隔离 */
+  sessionId: string
   /** DeepSeek Key，用于执行 search/fetch/ocr；缺失时工具调用会失败 */
   toolApiKey: string
   /** 按附件 id 读取本地原件，供 ocr_file 使用 */
@@ -145,10 +149,12 @@ export async function* runAgent(
       let content: string
       let sources: ToolSource[] = []
       let attachment: AttachmentSummary | undefined
+      let workspace: { path: string; operation: 'created' | 'updated'; chars: number } | undefined
       try {
         const parsed = call.arguments ? (JSON.parse(call.arguments) as Record<string, unknown>) : {}
         const result = await runTool(call.name, parsed, {
           apiKey: options.toolApiKey,
+          sessionId: options.sessionId,
           loadFile: options.loadFile,
           saveFileText: options.saveFileText,
           loadFileText: options.loadFileText,
@@ -158,10 +164,11 @@ export async function* runAgent(
         content = result.content
         sources = result.sources
         attachment = result.attachment
-        yield { type: 'tool_result', call, round: step, sources, ok: true, attachment }
+        workspace = result.workspace
+        yield { type: 'tool_result', call, round: step, sources, ok: true, attachment, workspace }
       } catch (error) {
         const failure = classifyToolFailure(call.name, error)
-        content = `工具 ${call.name} 执行失败：${failure.message}`
+        content = `Tool ${call.name} failed: ${failure.message}`
         yield {
           type: 'tool_result',
           call,

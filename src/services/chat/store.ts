@@ -2,7 +2,13 @@ import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
 import { createConfiguredPiProvider, modelAcceptsImages } from '../providers/piAi.js'
 import type { ProviderImage } from '../providers/types.js'
-import { OCR_TOOL_SCHEMA, READ_TOOL_SCHEMA, WEB_TOOL_SCHEMAS } from '../tools/registry.js'
+import {
+  EDIT_TOOL_SCHEMA,
+  OCR_TOOL_SCHEMA,
+  READ_TOOL_SCHEMA,
+  WEB_TOOL_SCHEMAS,
+  WRITE_TOOL_SCHEMA,
+} from '../tools/registry.js'
 import { runProviderReply } from './providerReply.js'
 import { buildProviderMessages, type AttachmentRef } from './providerContext.js'
 import { maybeGenerateTitle } from './autoTitle.js'
@@ -831,7 +837,11 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
     const needsOcr = refs.length > 0 && (hasDocuments || !acceptsImages)
     const toolSchemas = [
       ...(initial.search ? WEB_TOOL_SCHEMAS : []),
-      ...(needsOcr ? [OCR_TOOL_SCHEMA, READ_TOOL_SCHEMA] : []),
+      ...(needsOcr ? [OCR_TOOL_SCHEMA] : []),
+      // 文件工具只写应用内工作区，任何对话都可以用
+      READ_TOOL_SCHEMA,
+      WRITE_TOOL_SCHEMA,
+      EDIT_TOOL_SCHEMA,
     ]
     // 工具只会调 DeepSeek 服务：优先独立配置的 Key，其次旧版 Key，DeepSeek 模型可复用模型 Key
     const serviceApiKey =
@@ -862,6 +872,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       model: settings.provider.model,
       messages,
       tools: toolSchemas,
+      sessionId,
       toolApiKey: serviceApiKey,
       loadFile: db.loadFile,
       saveFileText: db.saveFileText,

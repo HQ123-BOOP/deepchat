@@ -28,6 +28,8 @@ export type ProviderReplyOptions = {
   messages: ProviderMessage[]
   /** 本轮声明给模型的工具 */
   tools?: ToolSchema[]
+  /** 会话 id：write / edit 的工作区按会话隔离 */
+  sessionId: string
   /** 执行 search/fetch/ocr 用的 DeepSeek Key */
   toolApiKey: string
   /** ocr_file 按附件 id 读取本地原件 */
@@ -155,6 +157,7 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
       model: options.model,
       messages: options.messages,
       tools: options.tools,
+      sessionId: options.sessionId,
       toolApiKey: options.toolApiKey,
       loadFile: options.loadFile,
       saveFileText: options.saveFileText,
@@ -261,6 +264,18 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
               ...(failure?.status ? { status: failure.status } : {}),
             })
           }
+          options.onChange(reply)
+          continue
+        }
+        // write / edit 的产物：保留一行可点开的文件记录
+        if (event.workspace) {
+          pushBlock({
+            type: 'workspace_file',
+            id: toolUseId(event.call.id),
+            path: event.workspace.path,
+            operation: event.workspace.operation,
+            chars: event.workspace.chars,
+          })
           options.onChange(reply)
           continue
         }
