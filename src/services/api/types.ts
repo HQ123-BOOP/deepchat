@@ -156,7 +156,7 @@ export type AssistantBlockParam =
   | WebSearchToolResultBlockParam
   | WebFetchToolResultBlockParam
 
-/** 末尾 assistant 自动触发继续生成，无需 prefix 字段 */
+/** 请求以 user 结尾，assistant 只用于历史 */
 export type MessageParam =
   /** Chat Engine 扩展角色，位于对应 user 前；需服务端支持 latest_reminder。 */
   | { role: 'latest_reminder'; content: string }

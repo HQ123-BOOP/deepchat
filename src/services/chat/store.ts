@@ -18,7 +18,7 @@ import {
   getDraft,
   prepareDraftMessage,
 } from './drafts.js'
-import { canContinueReply, settleReply } from './reply.js'
+import { settleReply } from './reply.js'
 import {
   toSessionSummary,
   type AssistantMessage,
@@ -246,7 +246,6 @@ const createReply = (): AssistantMessage => {
     model: useSettings.getState().provider.model,
     thinking,
     search,
-    prefix: true,
     status: 'pending',
     blocks: [],
   }
@@ -725,45 +724,6 @@ export const selectMessageVersion = (sessionId: string, messageId: string) => {
   persist(sessionId)
 }
 
-/** 继续最后一条未完成的回答：保留原消息与开关，仅将新流的内容追加到原块之后。 */
-export const continueReply = (sessionId: string, messageId: string) => {
-  if (get().importingHistory || deletingSessions.has(sessionId)) {
-    return
-  }
-  const session = getSession(sessionId)
-  if (!session || getStreamController(sessionId)) {
-    return
-  }
-  const path = getVisibleMessages(session)
-  const question = path.at(-2)
-  const previous = path.at(-1)
-  if (
-    question?.role !== 'user' ||
-    previous?.role !== 'assistant' ||
-    previous.id !== messageId ||
-    !canContinueReply(previous)
-  ) {
-    return
-  }
-  const { reasoningEffort, search } = useSettings.getState()
-  const thinking = reasoningEffort !== 'off'
-  const reply: AssistantMessage = {
-    ...previous,
-    // 未记录请求配置的回复，续写时使用默认模型和当前开关。
-    model: previous.model ?? useSettings.getState().provider.model,
-    thinking: previous.thinking ?? thinking,
-    search: previous.search ?? search,
-    status: 'pending',
-    stopReason: undefined,
-    stopDetails: undefined,
-    error: undefined,
-  }
-  updateReply(sessionId, reply)
-  updateSession(sessionId, (s) => ({ ...s, updatedAt: Date.now() }))
-  persist(sessionId)
-  void streamReply(sessionId, reply, { history: path.slice(0, -2), question, prefix: previous })
-}
-
 /** 附件补传失败后重试：保留原回答位置，重新补传并请求 */
 export const retryUpload = (sessionId: string, messageId: string) => {
   if (get().importingHistory || deletingSessions.has(sessionId)) {
@@ -790,7 +750,7 @@ export const retryUpload = (sessionId: string, messageId: string) => {
   void streamReply(sessionId, reply, { history: path.slice(0, index - 1), question })
 }
 
-type Request = { history: Message[]; question: UserMessage; prefix?: AssistantMessage }
+type Request = { history: Message[]; question: UserMessage }
 
 /** 把本地 Blob 转成不含 data: 前缀的 base64，供标准 Chat API 的 image_url 块使用 */
 const blobToBase64 = (blob: Blob): Promise<string> =>

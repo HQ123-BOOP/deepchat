@@ -38,6 +38,11 @@ export type AgentEvent =
       /** 附件解析结果，供 UI 显示一行可点开的记录 */
       attachment?: AttachmentSummary
     }
+  /**
+   * 本轮产生的原始 function call 消息：assistant 工具调用与对应的 tool 结果。
+   * 调用方按顺序追加到回复里保存，回放历史时原样送回模型。
+   */
+  | { type: 'trace'; messages: ProviderMessage[] }
   | { type: 'done'; stopReason: 'stop' | 'length' | 'error'; error?: string }
 
 export type AgentOptions = {
@@ -126,19 +131,20 @@ export async function* runAgent(
     }
 
     // 把这一轮的助手消息（可能含正文 + 工具调用）写入历史，再逐个执行工具
-    messages.push({
+    const assistant: ProviderMessage = {
       role: 'assistant',
       content: text,
       toolCalls: pending,
       ...(reasoning ? { reasoning } : {}),
       ...(reasoningSignature ? { reasoningSignature } : {}),
-    })
+    }
+    messages.push(assistant)
+    yield { type: 'trace', messages: [assistant] }
     for (const call of pending) {
       yield { type: 'tool_start', call, round: step }
       let content: string
       let sources: ToolSource[] = []
       let attachment: AttachmentSummary | undefined
-      let ok = true
       try {
         const parsed = call.arguments ? (JSON.parse(call.arguments) as Record<string, unknown>) : {}
         const result = await runTool(call.name, parsed, {
@@ -152,8 +158,8 @@ export async function* runAgent(
         content = result.content
         sources = result.sources
         attachment = result.attachment
+        yield { type: 'tool_result', call, round: step, sources, ok: true, attachment }
       } catch (error) {
-        ok = false
         const failure = classifyToolFailure(call.name, error)
         content = `工具 ${call.name} 执行失败：${failure.message}`
         yield {
@@ -161,15 +167,14 @@ export async function* runAgent(
           call,
           round: step,
           sources,
-          ok,
+          ok: false,
           error: failure.message,
           failure: { code: failure.code, tool: failure.tool, status: failure.status },
         }
-        messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content })
-        continue
       }
-      yield { type: 'tool_result', call, round: step, sources, ok, attachment }
-      messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content })
+      const toolMessage: ProviderMessage = { role: 'tool', toolCallId: call.id, name: call.name, content }
+      messages.push(toolMessage)
+      yield { type: 'trace', messages: [toolMessage] }
     }
   }
 }

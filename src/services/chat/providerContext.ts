@@ -136,6 +136,7 @@ const SUMMARY_INSTRUCTION = [
  */
 const hasSendableContent = (reply: AssistantMessage): boolean =>
   getReplyText(reply) !== '' ||
+  (reply.toolTrace?.length ?? 0) > 0 ||
   reply.blocks.some(
     (block) =>
       (block.type === 'thinking' && block.thinking.trim() !== '') ||
@@ -160,19 +161,26 @@ const usableRounds = (history: Message[]): [UserMessage, AssistantMessage][] => 
 }
 
 /**
- * 把一轮里已交付的工具痕迹转成文本，附在 assistant 正文后。
- *
- * 对齐 harness「中断时只保留已交付内容」：工具调用本身不回传给模型（避免伪造
- * 不具备结果的 function call），但搜索结果、读到的网页和失败原因作为文本带上，
- * 让续写时能看到上一轮掌握了哪些外部信息，而不是面对一个只有提问的空壳。
+ * 早期消息没有 function call 轨迹时的退路：把已交付的检索结果拼成文本。
+ * 工具调用本身不回传（避免伪造没有结果的 function call），只带来源与失败原因。
  */
+const MAX_EVIDENCE_SOURCES = 12
+const MAX_EVIDENCE_SNIPPET = 220
+const MAX_EVIDENCE_CHARS = 6000
+
 const toolBlocksToText = (reply: AssistantMessage): string => {
   const lines: string[] = []
   for (const block of reply.blocks) {
+    if (lines.length >= MAX_EVIDENCE_SOURCES) {
+      break
+    }
     if (block.type === 'web_search_tool_result') {
       for (const item of block.content) {
+        if (lines.length >= MAX_EVIDENCE_SOURCES) {
+          break
+        }
         if (item.type === 'web_search_result' && item.url) {
-          const snippet = item.snippet?.slice(0, 300) ?? ''
+          const snippet = item.snippet?.slice(0, MAX_EVIDENCE_SNIPPET) ?? ''
           lines.push(`- ${item.title || item.url}\n  ${item.url}${snippet ? `\n  ${snippet}` : ''}`)
         }
       }
@@ -183,24 +191,62 @@ const toolBlocksToText = (reply: AssistantMessage): string => {
       lines.push(`- 工具 ${block.tool} 调用失败：${block.code}`)
     }
   }
-  return lines.length ? `【上一轮检索到的资料】\n${lines.join('\n')}` : ''
+  return lines.length ? `【上一轮检索到的资料】\n${lines.join('\n')}`.slice(0, MAX_EVIDENCE_CHARS) : ''
+}
+
+/**
+ * trace 已经带走了各工具步骤的正文与思考，这里只取最后一段（最终回答）。
+ * trace 中 assistant 正文/思考的字符数与内容块按同一顺序产生，据此跳过已回放的部分。
+ */
+const finalSegment = (reply: AssistantMessage) => {
+  let textBudget = 0
+  let thinkingBudget = 0
+  for (const message of reply.toolTrace ?? []) {
+    if (message.role !== 'assistant') {
+      continue
+    }
+    textBudget += message.content.length
+    thinkingBudget += message.reasoning?.length ?? 0
+  }
+  const texts: string[] = []
+  const thinking: ThinkingPart[] = []
+  for (const block of reply.blocks) {
+    if (block.type === 'text') {
+      if (textBudget >= block.text.length) {
+        textBudget -= block.text.length
+        continue
+      }
+      texts.push(textBudget > 0 ? block.text.slice(textBudget) : block.text)
+      textBudget = 0
+    } else if (block.type === 'thinking') {
+      if (thinkingBudget >= block.thinking.length) {
+        thinkingBudget -= block.thinking.length
+        continue
+      }
+      const rest = thinkingBudget > 0 ? block.thinking.slice(thinkingBudget) : block.thinking
+      thinkingBudget = 0
+      if (rest.trim()) {
+        thinking.push({ ...block, thinking: rest })
+      }
+    }
+  }
+  return { texts, thinking }
 }
 
 const toRoundMessages = (user: UserMessage, reply: AssistantMessage): ProviderMessage[] => {
-  const text = reply.blocks
-    .filter((block) => block.type === 'text')
-    .map((block) => (block as { text: string }).text)
-    .join('\n\n')
+  const trace = reply.toolTrace ?? []
+  const { texts, thinking } = finalSegment(reply)
+  const text = texts.join('\n\n')
   // 历史轮次同样回传思考与签名：DeepSeek 需要 reasoning_content 才能续接推理
-  const thinking = reply.blocks.filter(
-    (block): block is ThinkingPart => block.type === 'thinking' && block.thinking.trim() !== ''
-  )
   const reasoning = thinking.map((block) => block.thinking).join('\n\n')
   const reasoningSignature = thinking.find((block) => block.signature)?.signature
-  const evidence = toolBlocksToText(reply)
+  // 有原始轨迹时不再拼检索文本，避免同一批资料进上下文两次
+  const evidence = trace.length > 0 ? '' : toolBlocksToText(reply)
   const content = [text, evidence].filter(Boolean).join('\n\n')
   return [
     { role: 'user', content: user.content },
+    // 工具调用与结果原样回放，模型看到的是上一轮真实的 function call 序列
+    ...trace,
     {
       role: 'assistant',
       // 空正文但有思考时靠 reasoning 携带内容；两者都空时留占位，避免发出纯空消息。

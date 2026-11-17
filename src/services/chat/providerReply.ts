@@ -137,6 +137,10 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
         appendToLast('thinking', event.text)
       } else if (event.type === 'reasoning_signature') {
         attachReasoningSignature(event.signature)
+      } else if (event.type === 'trace') {
+        // function call 与结果原样留在回复里，随会话落库；回放历史时按原顺序送回模型
+        reply = { ...reply, toolTrace: [...(reply.toolTrace ?? []), ...event.messages] }
+        options.onChange(reply)
       } else if (event.type === 'tool_start') {
         // 工具调用说明思考阶段已结束
         closeThinking(Date.now())

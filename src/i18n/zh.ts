@@ -34,7 +34,6 @@ export const zh = {
   send: '发送',
   editMessage: '编辑消息',
   regenerate: '重新生成',
-  continueGenerating: '继续生成',
   changeApiKey: '更换 API Key',
   topUp: '前往充值',
   messageSearchSummary: '1 个网页',

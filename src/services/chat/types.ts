@@ -1,5 +1,6 @@
 import type { TranslationMessage } from '../../i18n/index.js'
 import type { ApiErrorKind } from '../api/client.js'
+import type { ProviderMessage } from '../providers/types.js'
 import type {
   MessageUsage,
   ServerToolBlock,
@@ -110,11 +111,14 @@ export type AssistantMessage = MessageBranch & {
   search?: boolean
   /** 本轮请求的系统信息快照；各回答版本独立保存，续写沿用。历史消息中缺省的快照保持为空。 */
   latestReminder?: string
-  /** 是否允许作为续写前缀；仍需满足回复状态与内容限制。 */
-  prefix: boolean
   status: ReplyStatus
   /** 可识别的内容块按接收顺序排列；续写产生的块追加在已有块之后 */
   blocks: ReplyBlock[]
+  /**
+   * 本轮本地 function call 的原始消息：assistant 工具调用与对应的 tool 结果，按产生顺序排列。
+   * 回放历史时原样送回模型；早期没有该字段的消息退化为把检索结果拼成文本。
+   */
+  toolTrace?: ProviderMessage[]
   stopReason?: StopReason
   stopDetails?: StopDetails
   /** 最近一次请求的用量，续写后更新 */

@@ -38,7 +38,6 @@ export const en = {
   send: 'Send',
   editMessage: 'Edit message',
   regenerate: 'Regenerate',
-  continueGenerating: 'Continue',
   changeApiKey: 'Change API Key',
   topUp: 'Top up',
   messageSearchSummary: '1 web page',
