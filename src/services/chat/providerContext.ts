@@ -242,8 +242,14 @@ const createReader = (blocks: ReplyBlock[]) => {
   return { takeText, takeThinking }
 }
 
-const toRoundMessages = (user: UserMessage, reply: AssistantMessage): ProviderMessage[] => {
-  const messages: ProviderMessage[] = [{ role: 'user', content: user.content }]
+const toRoundMessages = (
+  user: UserMessage,
+  reply: AssistantMessage,
+  images?: ProviderImage[]
+): ProviderMessage[] => {
+  const messages: ProviderMessage[] = [
+    { role: 'user', content: user.content, ...(images?.length ? { images } : {}) },
+  ]
   // 早期版本存过别的轨迹形状；没有可用步骤时按普通历史处理
   const steps = (reply.toolTrace ?? []).filter((step) => Array.isArray(step.toolCalls))
   if (steps.length === 0) {
@@ -347,8 +353,14 @@ export type BuildContextOptions = {
   images?: ProviderImage[]
   /** 本轮附件清单，注入用户消息供工具按 file_id 取用 */
   attachments?: AttachmentRef[]
+  /** 历史提问里的图片；返回 undefined 表示不支持、过大或读取失败 */
+  loadHistoryImage?: (file: UserMessage['files'][number]) => Promise<ProviderImage | undefined>
   signal?: AbortSignal
 }
+
+/** 历史图片回放上限：最多 8 张、合计 16 MiB，避免每次请求都把历史图片全量内联 */
+const HISTORY_IMAGE_LIMIT = 8
+const HISTORY_IMAGE_BYTES = 16 * 1024 * 1024
 
 /** 每个工具的补充说明；联网工具沿用 DSH 的系统提示，强调外部内容不可信 */
 const TOOL_HINTS: Record<string, string> = {
@@ -403,15 +415,46 @@ export const buildProviderMessages = async ({
   tools,
   images,
   attachments,
+  loadHistoryImage,
   signal,
 }: BuildContextOptions): Promise<ProviderMessage[]> => {
   const rounds = usableRounds(history)
   const { trigger, retain } = thresholds(budget)
 
+  // 历史提问里的图片：从最近一轮往前装，超过数量或体积上限的旧图不再内联
+  const historyImages = new Map<string, ProviderImage[]>()
+  if (loadHistoryImage) {
+    const loaded = new Map<string, ProviderImage | undefined>()
+    let remaining = HISTORY_IMAGE_LIMIT
+    let bytes = HISTORY_IMAGE_BYTES
+    for (let i = rounds.length - 1; i >= 0 && remaining > 0 && bytes > 0; i--) {
+      const [user] = rounds[i]
+      const images: ProviderImage[] = []
+      for (const file of user.files) {
+        if (!file.isImage || remaining <= 0 || file.size > bytes) {
+          continue
+        }
+        if (!loaded.has(file.id)) {
+          loaded.set(file.id, await loadHistoryImage(file))
+        }
+        const image = loaded.get(file.id)
+        if (!image) {
+          continue
+        }
+        images.push(image)
+        remaining -= 1
+        bytes -= file.size
+      }
+      if (images.length > 0) {
+        historyImages.set(user.id, images)
+      }
+    }
+  }
+
   const flatten = (from: number): ProviderMessage[] => {
     const out: ProviderMessage[] = []
     for (let i = from; i < rounds.length; i++) {
-      out.push(...toRoundMessages(rounds[i][0], rounds[i][1]))
+      out.push(...toRoundMessages(rounds[i][0], rounds[i][1], historyImages.get(rounds[i][0].id)))
     }
     return out
   }
@@ -446,7 +489,11 @@ export const buildProviderMessages = async ({
   let keepFrom = rounds.length
   let kept = 0
   for (let i = rounds.length - 1; i >= 0; i--) {
-    const round = toRoundMessages(rounds[i][0], rounds[i][1])
+    const round = toRoundMessages(
+      rounds[i][0],
+      rounds[i][1],
+      historyImages.get(rounds[i][0].id)
+    )
     kept += countTokens(round)
     if (kept > retain) {
       break

@@ -907,6 +907,23 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       locale: settings.locale,
       location: settings.location,
     })
+    // 历史轮次里的图片同样内联，续聊时模型仍能看到之前的图
+    const loadHistoryImage = acceptsImages
+      ? async (file: FileAttachment) => {
+          if (file.size > MAX_INLINE_IMAGE_BYTES) {
+            return undefined
+          }
+          const blob = await db.loadFile(file.id)
+          if (!blob) {
+            return undefined
+          }
+          const mimeType = file.mimeType || blob.type
+          if (!/^image\/(jpeg|png|gif|webp)$/i.test(mimeType)) {
+            return undefined
+          }
+          return { data: await blobToBase64(blob), mimeType }
+        }
+      : undefined
     const messages = await buildProviderMessages({
       provider,
       model: settings.provider.model,
@@ -917,6 +934,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       tools: toolSchemas,
       images,
       attachments: refs,
+      loadHistoryImage,
       signal: controller.signal,
     })
     reply = await runProviderReply({
