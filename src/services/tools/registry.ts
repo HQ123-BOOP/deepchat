@@ -55,11 +55,14 @@ export const WEB_TOOL_SCHEMAS: ToolSchema[] = [
   },
 ]
 
-/** OCR 一次最多回给模型的字符数；超出部分由 read 分段续读 */
+/** OCR 一次最多回给模型的字符数；超出部分由 read 按行续读 */
 export const OCR_PREVIEW_CHARS = 20000
-/** read 单次默认与上限，与工具输出总上限保持一致，续读提示始终准确 */
-export const READ_DEFAULT_CHARS = 20000
-export const READ_MAX_CHARS = 20000
+/** read 单次默认与上限的行数，对齐 harness 的 readLimit */
+export const READ_LIMIT = 2000
+/** 单行最多返回的字符数，超出追加说明 */
+export const READ_MAX_LINE_LENGTH = 2000
+/** 单次返回内容的 UTF-8 字节上限，超出停止收集并标注 */
+export const READ_MAX_BYTES = 50 * 1024
 
 /** 本轮有附件时才声明：解析结果落到应用内部，模型按 file_id 读取 */
 export const OCR_TOOL_SCHEMA: ToolSchema = {
@@ -82,25 +85,25 @@ export const OCR_TOOL_SCHEMA: ToolSchema = {
   } satisfies JsonSchema,
 }
 
-/** 只在有解析结果需要续读时才有意义；与 ocr_file 一起声明 */
+/** 只在有文本需要分页读取时才有意义；与 ocr_file 一起声明 */
 export const READ_TOOL_SCHEMA: ToolSchema = {
   name: 'read',
   description:
-    'Read the text saved for an attachment. Returns a bounded window starting at a 1-based character offset; call it again with the returned offset to continue a long document.',
+    'Read an attachment as line-numbered text. Plain-text uploads are read directly; documents and images must be parsed with ocr_file first. Use offset and limit to continue a long document.',
   parameters: {
     type: 'object',
     properties: {
       file_id: { type: 'string', description: 'The attachment file_id from the user message.' },
       offset: {
         type: 'integer',
-        description: '1-based character offset to start from. Defaults to 1.',
+        description: '1-based first line to return. Defaults to 1.',
         minimum: 1,
       },
       limit: {
         type: 'integer',
-        description: `Maximum characters to return. Defaults to ${READ_DEFAULT_CHARS}.`,
+        description: `Maximum number of lines to return. Defaults to ${READ_LIMIT}.`,
         minimum: 1,
-        maximum: READ_MAX_CHARS,
+        maximum: READ_LIMIT,
       },
     },
     required: ['file_id'],
@@ -227,6 +230,97 @@ const formatSearchContent = (query: string, entries: string[]): string => {
 const trim = (text: string, limit: number) =>
   text.length <= limit ? text : `${text.slice(0, limit)}…`
 
+/** 可直接按文本读取的附件：MIME 为文本类，或扩展名在白名单里 */
+const TEXT_MIME =
+  /^text\/|^application\/(json|xml|x-ndjson|ndjson|javascript|x-yaml|yaml|toml|sql|x-sh)\b/i
+const TEXT_EXT =
+  /\.(txt|md|markdown|mdx|json|jsonl|ndjson|csv|tsv|log|yaml|yml|xml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|java|c|h|cc|cpp|go|rs|sh|sql|ini|toml|conf)$/i
+
+const isTextAttachment = (name: string, mime: string) =>
+  TEXT_MIME.test(mime) || TEXT_EXT.test(name)
+
+/** 纯文本附件直接解码；二进制或编码无法识别时返回 undefined，交由 ocr_file 处理 */
+const loadPlainText = async (ctx: ToolContext, id: string): Promise<string | undefined> => {
+  const blob = await ctx.loadFile(id)
+  if (!blob) {
+    return undefined
+  }
+  const name = ctx.fileNames?.[id] ?? id
+  if (!isTextAttachment(name, blob.type)) {
+    return undefined
+  }
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  // 含 NUL 的按二进制处理，避免把图片或压缩包解码成乱码
+  if (bytes.includes(0)) {
+    return undefined
+  }
+  for (const encoding of ['utf-8', 'gb18030']) {
+    try {
+      return new TextDecoder(encoding, { fatal: true }).decode(bytes)
+    } catch {
+      // 编码不匹配时换下一种再试
+    }
+  }
+  return undefined
+}
+
+const encoder = new TextEncoder()
+
+/**
+ * 对齐 harness 的 read 输出：编号行 + 续读/结束尾注，包在 path/type/content 信封里。
+ * 按行分页，单行与总字节都有上限；即使命中字节上限也继续扫描全文，给出准确总行数。
+ */
+const formatReadWindow = (name: string, text: string, offset: number, limit: number): string => {
+  const lines: string[] = []
+  let totalLines = 0
+  let outputBytes = 0
+  let capped = false
+  let start = 0
+  while (start < text.length) {
+    const newline = text.indexOf('\n', start)
+    const end = newline === -1 ? text.length : newline
+    let line = text.slice(start, end)
+    if (line.endsWith('\r')) {
+      line = line.slice(0, -1)
+    }
+    totalLines += 1
+    if (!capped && totalLines >= offset && lines.length < limit) {
+      const shown =
+        line.length > READ_MAX_LINE_LENGTH
+          ? `${line.slice(0, READ_MAX_LINE_LENGTH)}... (line truncated to ${READ_MAX_LINE_LENGTH} chars)`
+          : line
+      const bytes = encoder.encode(shown).length + (lines.length > 0 ? 1 : 0)
+      if (outputBytes + bytes > READ_MAX_BYTES) {
+        capped = true
+      } else {
+        outputBytes += bytes
+        lines.push(`${totalLines}: ${shown}`)
+      }
+    }
+    if (newline === -1) {
+      break
+    }
+    start = newline + 1
+  }
+
+  if (!capped && offset > totalLines && !(totalLines === 0 && offset === 1)) {
+    throw new ToolFailure(
+      'read',
+      'invalid_arguments',
+      `offset ${offset} is out of range for "${name}" (${totalLines} lines)`
+    )
+  }
+
+  const endLine = lines.length > 0 ? offset + lines.length - 1 : offset - 1
+  const footer = capped
+    ? `(Output capped. Showing lines ${offset}-${endLine}. Use offset=${endLine + 1} to continue.)`
+    : endLine < totalLines
+      ? `(Showing lines ${offset}-${endLine} of ${totalLines}. Use offset=${endLine + 1} to continue.)`
+      : `(End of file - total ${totalLines} lines)`
+  const body = lines.length > 0 ? `${lines.join('\n')}\n\n${footer}` : footer
+  return `<path>${name}</path>\n<type>file</type>\n<content>\n${body}\n</content>`
+}
+
 const toSource = (result: SearchResult): ToolSource => ({
   title: result.title || result.url,
   url: result.url,
@@ -255,7 +349,7 @@ const positiveInteger = (name: string, value: unknown): number | undefined => {
   }
   const parsed = typeof value === 'number' ? Math.trunc(value) : Number.NaN
   if (!Number.isFinite(parsed) || parsed < 1) {
-    throw new ToolFailure('read', 'invalid_arguments', `read 的 ${name} 必须是正整数`)
+    throw new ToolFailure('read', 'invalid_arguments', `${name} must be a positive integer`)
   }
   return parsed
 }
@@ -335,11 +429,12 @@ export const runTool = async (
       createdAt: Date.now(),
     })
     const head = text.slice(0, OCR_PREVIEW_CHARS)
-    const remain = text.length - head.length
-    const lines = [`附件「${fileName}」识别完成：共 ${result.page_count} 页、${text.length} 字符。`]
-    if (remain > 0) {
+    const lines = [`Parsed "${fileName}": ${result.page_count} pages, ${text.length} characters.`]
+    if (text.length > head.length) {
+      // read 按行分页：用预览末尾所在行号续读，宁可重读当前行也不跳过内容
+      const nextLine = head.split('\n').length
       lines.push(
-        `以下是第 1–${head.length} 字符；剩余 ${remain} 字符，调用 read（file_id: ${id}，offset: ${head.length + 1}）继续读取。`
+        `Showing the first ${head.length} characters. Call read with file_id "${id}", offset ${nextLine}, to continue.`
       )
     }
     return {
@@ -351,31 +446,29 @@ export const runTool = async (
   if (name === 'read') {
     const id = typeof args.file_id === 'string' ? args.file_id.trim() : ''
     if (!id) {
-      throw new ToolFailure('read', 'invalid_arguments', 'read 需要非空的 file_id')
+      throw new ToolFailure('read', 'invalid_arguments', 'file_id must be a non-empty string')
+    }
+    const offset = positiveInteger('offset', args.offset) ?? 1
+    const limit = positiveInteger('limit', args.limit) ?? READ_LIMIT
+    if (limit > READ_LIMIT) {
+      throw new ToolFailure(
+        'read',
+        'invalid_arguments',
+        `limit must be less than or equal to ${READ_LIMIT}`
+      )
     }
     const doc = await ctx.loadFileText?.(id)
-    if (!doc) {
+    const fileName = doc?.name ?? ctx.fileNames?.[id] ?? id
+    // OCR 结果优先；没有解析记录时，纯文本附件直接按原文读取
+    const text = doc?.text ?? (await loadPlainText(ctx, id))
+    if (text === undefined) {
       throw new ToolFailure(
         'read',
         'invalid_arguments',
-        `附件 ${id} 还没有识别结果，先调用 ocr_file 解析`
+        `attachment "${fileName}" is not plain text; call ocr_file with file_id "${id}" first`
       )
     }
-    const total = doc.text.length
-    const offset = positiveInteger('offset', args.offset) ?? 1
-    if (total > 0 && offset > total) {
-      throw new ToolFailure(
-        'read',
-        'invalid_arguments',
-        `offset 超出范围：全文共 ${total} 字符`
-      )
-    }
-    const limit = Math.min(positiveInteger('limit', args.limit) ?? READ_DEFAULT_CHARS, READ_MAX_CHARS)
-    const slice = doc.text.slice(offset - 1, offset - 1 + limit)
-    const end = offset - 1 + slice.length
-    const header = `附件「${doc.name}」第 ${offset}–${end} 字符，共 ${total} 字符。`
-    const footer = end < total ? `\n\n[已截断] 继续读取请调用 read，offset: ${end + 1}。` : ''
-    return { content: `${header}\n\n${slice}${footer}`, sources: [] }
+    return { content: formatReadWindow(fileName, text, offset, limit), sources: [] }
   }
   throw new ToolFailure(name, 'unknown_tool', `未知工具：${name}`)
 }
