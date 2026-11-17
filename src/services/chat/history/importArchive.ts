@@ -49,6 +49,17 @@ const readEntryBlob = async (entry: ArchiveEntry): Promise<Blob> => {
 }
 
 /**
+ * 丢弃条目内容但读完并校验 CRC：readSelectedArchive 要求每个选中的条目都被消费，
+ * 未消费就请求下一条会被判定为归档损坏。
+ */
+const drainEntry = async (entry: ArchiveEntry): Promise<void> => {
+  const reader = entry.stream[Symbol.asyncIterator]()
+  while (!(await reader.next()).done) {
+    // 丢弃数据，只为完成 CRC 校验。
+  }
+}
+
+/**
  * 条目分类校验（基于中央目录文件名，不解压）：
  * 只允许 manifest、user、index、会话 JSON 与会话图片目录，其余一律视为归档不完整。
  */
@@ -141,8 +152,9 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
     const stored = new Map<string, string>()
     const sessionBuffer: Session[] = []
     const fileBuffer: { id: string; blob: Blob }[] = []
-    const SESSION_BATCH = 64
-    const FILE_BATCH = 16
+    // 移动端 IPC 对单次 payload 很敏感：图片每批 2 张，会话每批 16 条
+    const SESSION_BATCH = 16
+    const FILE_BATCH = 2
     let kept = 0
 
     const flushBuffers = async () => {
@@ -169,8 +181,9 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
 
     const saveImage = async (entry: ArchiveEntry) => {
       const id = images.get(entry.path)
-      // 未登记（未保留会话或交错顺序先于会话 JSON）的图片条目直接丢弃。
+      // 未登记（未保留会话）或已保存过的图片：读完丢弃，保证条目被完整消费
       if (id === undefined || stored.has(id)) {
+        await drainEntry(entry)
         return
       }
       const data = await readEntryBlob(entry)
