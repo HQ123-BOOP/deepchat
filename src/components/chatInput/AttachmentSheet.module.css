@@ -10,18 +10,15 @@
 }
 
 .sheetOpen {
-  max-height: 58vh;
+  max-height: 200px;
   opacity: 1;
   pointer-events: auto;
 }
 
 .sheetInner {
   box-sizing: border-box;
-  margin-top: 8px;
-  padding: 14px;
-  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
-  border-radius: 20px;
-  background: var(--dsw-specific-input-major);
+  margin-top: 4px;
+  padding: 0;
 }
 
 .recentHeader {
@@ -31,17 +28,24 @@
   line-height: 18px;
 }
 
-.recentGrid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-  max-height: 30vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+/* 一排缩略图，左右滑动；不滚动条、不换行 */
+.recentRow {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .photo {
   position: relative;
+  flex: 0 0 68px;
   aspect-ratio: 1;
   padding: 0;
   overflow: hidden;
@@ -59,6 +63,17 @@
 
   &:disabled {
     cursor: default;
+  }
+}
+
+.photoSelected {
+  &::after {
+    position: absolute;
+    inset: 0;
+    border: 2px solid var(--dsw-alias-brand-primary);
+    border-radius: 10px;
+    content: '';
+    pointer-events: none;
   }
 }
 
@@ -103,6 +118,7 @@
 }
 
 .skeleton {
+  flex: 0 0 68px;
   aspect-ratio: 1;
   border-radius: 10px;
   background: var(--dsw-alias-bg-skeleton);
@@ -110,8 +126,8 @@
 }
 
 .empty {
-  grid-column: 1 / -1;
-  padding: 18px 0;
+  width: 100%;
+  padding: 24px 0;
   color: var(--dsw-alias-label-tertiary);
   font-size: 13px;
   text-align: center;
@@ -121,7 +137,7 @@
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .action {

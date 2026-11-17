@@ -348,7 +348,6 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
       {isMobile ? (
         <AttachmentSheet
           open={sheetOpen}
-          onClose={() => setSheetOpen(false)}
           onCamera={() => {
             setSheetOpen(false)
             cameraInputRef.current?.click()

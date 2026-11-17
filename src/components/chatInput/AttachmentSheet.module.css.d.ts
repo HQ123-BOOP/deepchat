@@ -3,10 +3,11 @@ declare const styles: {
   readonly "sheetOpen": string;
   readonly "sheetInner": string;
   readonly "recentHeader": string;
-  readonly "recentGrid": string;
+  readonly "recentRow": string;
   readonly "photo": string;
   readonly "photoCheck": string;
   readonly "photoBusy": string;
+  readonly "photoSelected": string;
   readonly "skeleton": string;
   readonly "empty": string;
   readonly "actions": string;
