@@ -664,6 +664,13 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.importConfirmMeta {
+  margin-top: 8px;
+  color: var(--dsw-alias-label-caption);
+  font: var(--dsw-font-xs-13);
+  font-variant-numeric: tabular-nums;
+}
+
 .deleteConfirm {
   max-height: calc(100dvh - 32px);
   overflow-y: auto;

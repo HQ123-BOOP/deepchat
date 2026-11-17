@@ -96,6 +96,37 @@ export const checkArchiveFormat = async (file: File): Promise<void> => {
 }
 
 /**
+ * 只读归档的 index，估算当前范围会处理多少会话；用于确认框提示，不解压会话内容。
+ */
+export const inspectArchive = async (
+  file: File,
+  options: BackupOptions
+): Promise<{ total: number; selected: number }> => {
+  if (!(await isZipFile(file))) {
+    fail('backupUnrecognized')
+  }
+  try {
+    const paths = await listArchivePaths(file)
+    if (!paths.includes(MANIFEST_PATH) || !paths.includes(INDEX_PATH)) {
+      fail('backupIncomplete')
+    }
+    checkManifest(JSON.parse(await (await readArchiveEntry(file, MANIFEST_PATH)).text()))
+    const index = readSessionIndex(
+      JSON.parse(await (await readArchiveEntry(file, INDEX_PATH)).text())
+    )
+    const selected = selectInRange(
+      index.map((entry) => ({ id: entry.id, updatedAt: Date.parse(entry.updated_at) })),
+      (item) => item.updatedAt,
+      options.range,
+      Date.now()
+    )
+    return { total: index.length, selected: selected.length }
+  } catch (error) {
+    throw error instanceof ArchiveError ? new BackupError('backupIncomplete') : error
+  }
+}
+
+/**
  * 选择性导入：先读中央目录与 index（两个小条目），按范围算出保留会话，
  * 再只解压保留会话的 JSON 与对应图片——跳过的条目完全不读取，耗时与所选范围成正比。
  * CRC 与大小校验只覆盖实际解压的条目。

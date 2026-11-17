@@ -827,6 +827,14 @@ const ImportConfirm = ({
       }
     >
       <div className={styles.importConfirmText}>{t('historyImportConfirmDescription')}</div>
+      {historyImport.preview ? (
+        <div className={styles.importConfirmMeta}>
+          {t('historyImportPreview', {
+            selected: historyImport.preview.selected,
+            total: historyImport.preview.total,
+          })}
+        </div>
+      ) : null}
       <div className={styles.label} style={{ marginTop: 16 }}>
         {t('historyRangeLabel')}
       </div>
@@ -1026,8 +1034,37 @@ const useHistoryImport = () => {
   const [range, setRange] = useState<RangeState>(DEFAULT_RANGE)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<BackupProgress | null>(null)
+  const [preview, setPreview] = useState<{ total: number; selected: number } | null>(null)
   const [status, setStatus] = useState<Status>(null)
   const importing = useRef(false)
+
+  // 选文件或改范围后先读归档 index，确认框里直接显示实际会处理多少会话
+  useEffect(() => {
+    if (!file) {
+      setPreview(null)
+      return
+    }
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const { inspectArchive } = await import('../../services/chat/history/importArchive.js')
+          const next = await inspectArchive(file, { range: toBackupRange(range) })
+          if (!cancelled) {
+            setPreview(next)
+          }
+        } catch {
+          if (!cancelled) {
+            setPreview(null)
+          }
+        }
+      })()
+    }, 150)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [file, range])
 
   const select = (next: File) => {
     setFile(next)
@@ -1069,6 +1106,7 @@ const useHistoryImport = () => {
     file,
     range,
     setRange,
+    preview,
     busy,
     progress,
     status,
