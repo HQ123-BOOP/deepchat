@@ -14,7 +14,8 @@
 
 @media not all and (min-width: 768px) {
   .container {
-    overflow: hidden;
+    /* clip 只裁剪、不创建滚动容器，否则会截断思考标题的 sticky 吸顶 */
+    overflow: clip;
     scrollbar-gutter: auto;
   }
 
