@@ -1,4 +1,5 @@
 mod asr;
+mod db;
 mod secrets;
 
 /// 让原生标题栏跟随应用内主题；不支持主题的平台直接忽略。
@@ -16,6 +17,10 @@ fn set_window_theme(window: tauri::WebviewWindow, theme: String) -> Result<(), S
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            db::init(app)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             set_window_theme,
             asr::asr_open,
@@ -28,7 +33,22 @@ pub fn run() {
             asr::asr_download_progress,
             secrets::secret_set,
             secrets::secret_get,
-            secrets::secret_delete
+            secrets::secret_delete,
+            db::db_load_summaries_page,
+            db::db_load_session,
+            db::db_save_session,
+            db::db_delete_session,
+            db::db_save_files,
+            db::db_load_file,
+            db::db_save_file_text,
+            db::db_load_file_text,
+            db::db_clear_staging,
+            db::db_add_staging_session,
+            db::db_add_staging_sessions,
+            db::db_save_staging_files,
+            db::db_update_staging_file_types,
+            db::db_commit_staging,
+            db::db_search
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
