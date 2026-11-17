@@ -47,24 +47,48 @@
 }
 
 .notice {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
   margin-top: 8px;
-  font-size: 14px;
-  line-height: 22px;
+  padding: 2px 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+/* 10px 布局位里画 6px 实心点，与步骤行状态点一致 */
+.noticeDot {
+  position: relative;
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 20%;
+    border-radius: 50%;
+    background: var(--dsw-alias-state-error-primary);
+  }
+}
+
+.noticeText {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.noticeTitle {
+  margin-right: 6px;
   color: var(--dsw-alias-state-error-primary);
+  font-weight: 600;
+}
 
-  > svg {
-    flex-shrink: 0;
-    margin-top: 4px;
-  }
-
-  > span {
-    min-width: 0;
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-  }
+.noticeCode {
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-markdown-code-block);
 }
 
 .noticeAction {

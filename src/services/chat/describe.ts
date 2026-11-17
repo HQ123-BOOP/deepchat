@@ -8,6 +8,29 @@ export type Notice = {
   presentation?: 'response'
   /** 需要用户处理的问题附带的操作 */
   action?: 'apiKey' | 'topUp'
+  /** 提示行右侧的错误码：HTTP 状态码或错误类别 */
+  code?: string
+}
+
+/** HTTP 状态码优先；没有状态码时退回错误类别，http 缺状态码则不展示 */
+const failureCode = (error: NonNullable<AssistantMessage['error']>): string | undefined => {
+  if (error.status !== undefined) {
+    return String(error.status)
+  }
+  switch (error.kind) {
+    case 'http':
+      return undefined
+    case 'upload':
+      return 'UPLOAD'
+    case 'network':
+      return 'NETWORK'
+    case 'stream':
+      return 'STREAM'
+    case 'interrupted':
+      return 'INTERRUPTED'
+    case 'protocol':
+      return 'PROTOCOL'
+  }
 }
 
 const getTemplateText = (reply: AssistantMessage) =>
@@ -19,6 +42,7 @@ const getTemplateText = (reply: AssistantMessage) =>
 export const describeReply = (reply: AssistantMessage): Notice | null => {
   if (reply.status === 'error' && reply.error) {
     const { kind, status, localMessage } = reply.error
+    const code = failureCode(reply.error)
     // 导入的历史可能来自不同版本；不识别的文案沿用保存时的原文。
     const message =
       localMessage && isTranslationKey(localMessage.key)
@@ -26,22 +50,26 @@ export const describeReply = (reply: AssistantMessage): Notice | null => {
         : reply.error.message
     // 历史补传错误刷新后仍需说明原因，恢复沿用附件卡片或重新生成。
     if (kind === 'upload') {
-      return { text: message || translate('uploadFileStatusFailed') }
+      return { text: message || translate('uploadFileStatusFailed'), ...(code ? { code } : {}) }
     }
     if (kind === 'network') {
-      return { text: translate('commonNetworkErrorToast') }
+      return { text: translate('commonNetworkErrorToast'), ...(code ? { code } : {}) }
     }
     switch (classifyStatus(status)) {
       case 'unauthorized':
-        return { text: translate('replyInvalidApiKey'), action: 'apiKey' }
+        return { text: translate('replyInvalidApiKey'), action: 'apiKey', ...(code ? { code } : {}) }
       case 'insufficientBalance':
-        return { text: translate('replyInsufficientBalance'), action: 'topUp' }
+        return {
+          text: translate('replyInsufficientBalance'),
+          action: 'topUp',
+          ...(code ? { code } : {}),
+        }
       case 'rateLimited':
-        return { text: translate('replyRateLimited') }
+        return { text: translate('replyRateLimited'), ...(code ? { code } : {}) }
       case 'serverBusy':
-        return { text: translate('completionServerBusyToast') }
+        return { text: translate('completionServerBusyToast'), ...(code ? { code } : {}) }
       default:
-        return message ? { text: message } : null
+        return { text: message, ...(code ? { code } : {}) }
     }
   }
   const template = getTemplateText(reply)

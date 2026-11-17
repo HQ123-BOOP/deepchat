@@ -1,7 +1,7 @@
 import { useTranslate } from '../../i18n/index.js'
 import clsx from 'clsx'
 import { memo } from 'react'
-import { IconRefreshOutline16, IconWarningOutline16 } from '../base/icons.js'
+import { IconRefreshOutline16 } from '../base/icons.js'
 import { describeReply } from '../../services/chat/describe.js'
 import { regenerateReply } from '../../services/chat/store.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
@@ -91,9 +91,10 @@ export const AssistantMessage = memo(function AssistantMessage({
           disableLink={false}
         />
       ) : notice ? (
-        <div className={styles.notice}>
-          <IconWarningOutline16 />
-          <span>
+        <div className={styles.notice} role="status">
+          <span className={styles.noticeDot} aria-hidden="true" />
+          <span className={styles.noticeText}>
+            <span className={styles.noticeTitle}>{t('replyFailedTitle')}</span>
             {notice.text}
             {notice.action === 'apiKey' ? (
               <>
@@ -121,6 +122,7 @@ export const AssistantMessage = memo(function AssistantMessage({
               </>
             ) : null}
           </span>
+          {notice.code ? <code className={styles.noticeCode}>{notice.code}</code> : null}
         </div>
       ) : null}
       {!streaming && !refused && view.searchResults.length > 0 ? (
