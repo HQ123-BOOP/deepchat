@@ -20,6 +20,20 @@ const enqueueBackup = <T>(run: () => Promise<T>): Promise<T> => {
 
 const backupFileName = (date: Date) => `deepseek_data-${formatDate(date)}.zip`
 
+/**
+ * 导入先把归档写进暂存表，提交时再复制到正式表，两份数据会短暂共存：
+ * 因此按未压缩体积的 2.2 倍估算所需空间，空间不足时在写入前拒绝，
+ * 避免写到一半磁盘满导致数据库损坏。
+ */
+const assertImportSpace = async (file: File): Promise<void> => {
+  const { archiveUncompressedSize } = await import('./history/zipReader.js')
+  const needed = (await archiveUncompressedSize(file)) * 2.2 + 64 * 1024 * 1024
+  const free = await db.freeSpace()
+  if (free < needed) {
+    throw new BackupError('backupNotEnoughSpace')
+  }
+}
+
 /** 按范围导出为历史会话导出格式的 ZIP，可再次导入。 */
 export const exportHistory = (options: BackupOptions): Promise<{ name: string; blob: Blob }> =>
   enqueueBackup(async () => {
@@ -63,6 +77,7 @@ export const importHistory = (file: File, options: BackupOptions): Promise<numbe
   enqueueBackup(async () => {
     const { checkArchiveFormat, importArchive } = await import('./history/importArchive.js')
     await checkArchiveFormat(file)
+    await assertImportSpace(file)
     return replaceHistory(() => importArchive(file, options))
   })
 

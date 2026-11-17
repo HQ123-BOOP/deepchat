@@ -308,6 +308,12 @@ export const listArchivePaths = async (file: File): Promise<string[]> => {
   return directory.entries.filter((entry) => !entry.path.endsWith('/')).map((entry) => entry.path)
 }
 
+/** 全部条目的未压缩字节数：导入前用它估算落库需要的磁盘空间。 */
+export const archiveUncompressedSize = async (file: File): Promise<number> => {
+  const directory = await getDirectory(file)
+  return directory.entries.reduce((sum, entry) => sum + entry.size, 0)
+}
+
 /**
  * 读出单个条目（CRC 与大小完整校验）：
  * 会话 JSON 需要完整解析，图片需要识别类型后整张保存。
