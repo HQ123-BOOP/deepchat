@@ -56,10 +56,10 @@ export const WEB_TOOL_SCHEMAS: ToolSchema[] = [
 ]
 
 /** OCR 一次最多回给模型的字符数；超出部分由 read 分段续读 */
-export const OCR_PREVIEW_CHARS = 8192
+export const OCR_PREVIEW_CHARS = 20000
 /** read 单次默认与上限，与工具输出总上限保持一致，续读提示始终准确 */
-export const READ_DEFAULT_CHARS = 8192
-export const READ_MAX_CHARS = 8192
+export const READ_DEFAULT_CHARS = 20000
+export const READ_MAX_CHARS = 20000
 
 /** 本轮有附件时才声明：解析结果落到应用内部，模型按 file_id 读取 */
 export const OCR_TOOL_SCHEMA: ToolSchema = {
@@ -193,7 +193,7 @@ export const classifyToolFailure = (tool: string, error: unknown): ToolFailure =
  * 回给模型的单次工具输出上限。对齐 harness：工具在产生输出时就截断并附一句说明，
  * 落库的轨迹因此与实时请求完全一致，回放时无需再改内容。
  */
-const TOOL_OUTPUT_MAX_CHARS = 8192
+const TOOL_OUTPUT_MAX_CHARS = 20000
 /** 对齐 harness 的 fetch 截断说明 */
 const TRUNCATION_FOOTER = '\n\n(Content truncated. Fetch a more specific URL or section for the full text.)'
 
