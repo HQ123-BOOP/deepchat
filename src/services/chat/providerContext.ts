@@ -1,11 +1,10 @@
 /**
- * 非 DeepSeek 提供商的上下文组装。
+ * 上下文组装：把本地历史投影成发给模型的 messages。
  *
- * 参考 deepseek-harness 的取舍：
- * - 上下文是一份可投影的历史，超出预算时先裁剪工具输出、再把较早的轮次压成
- *   一份结构化摘要（`<compacted-summary>`），最近的部分保持原样；
+ * 参考 deepseek harness 的取舍：
+ * - 超出预算时把较早的轮次压成一份结构化摘要（`<compacted-summary>`），最近的部分保持原样；
  * - 摘要作为一条 user 消息落在历史里，和普通内容一样参与后续轮次；
- * - 裁剪与摘要都只在压力出现时发生，平时的请求不受影响。
+ * - 压缩只在压力出现时发生；工具结果原样回放，不截断，避免改动历史内容、影响缓存命中。
  *
  * 与 harness 的差异：这里没有事件日志与“表面投影”，历史就是内存里的消息数组，
  * 因此摘要直接替换掉被压缩的那段历史。
@@ -17,7 +16,14 @@ import type {
   ToolSchema,
 } from '../providers/types.js'
 import { getReplyText } from './reply.js'
-import type { AssistantMessage, Message, ThinkingPart, UserMessage } from './types.js'
+import type {
+  AssistantMessage,
+  Message,
+  ReplyBlock,
+  TextPart,
+  ThinkingPart,
+  UserMessage,
+} from './types.js'
 
 /** 上下文预算：窗口、输出预留与安全余量 */
 export type ContextBudget = {
@@ -32,12 +38,6 @@ export type ContextBudget = {
   /** 压缩后保留的原样比例（相对可用窗口），默认 0.16 */
   retainRatio?: number
 }
-
-/** 工具输出裁剪的默认值，与 harness 的 pruner 一致 */
-const PRUNE_THRESHOLD_CHARS = 8192
-const PRUNE_HEAD_CHARS = 4096
-const PRUNE_TAIL_CHARS = 1024
-const PRUNE_MARKER = '\n\n[...中间内容已裁剪...]\n\n'
 
 const SUMMARY_OPEN = '<compacted-summary>'
 const SUMMARY_CLOSE = '</compacted-summary>'
@@ -56,22 +56,9 @@ export const estimateTokens = (text: string): number => {
   return cjk + Math.ceil(other / 4)
 }
 
-/** 超出阈值的工具输出裁成「头 + 标记 + 尾」 */
-export const pruneToolText = (
-  text: string,
-  threshold = PRUNE_THRESHOLD_CHARS,
-  head = PRUNE_HEAD_CHARS,
-  tail = PRUNE_TAIL_CHARS
-): string => {
-  if (text.length <= threshold) {
-    return text
-  }
-  return text.slice(0, head) + PRUNE_MARKER + text.slice(-tail)
-}
-
 const messageTokens = (message: ProviderMessage): number => {
   if (message.role === 'tool') {
-    return estimateTokens(pruneToolText(message.content)) + 8
+    return estimateTokens(message.content) + 8
   }
   if (message.role === 'assistant') {
     const calls = (message.toolCalls ?? []).reduce(
@@ -194,70 +181,107 @@ const toolBlocksToText = (reply: AssistantMessage): string => {
   return lines.length ? `【上一轮检索到的资料】\n${lines.join('\n')}`.slice(0, MAX_EVIDENCE_CHARS) : ''
 }
 
-/**
- * trace 已经带走了各工具步骤的正文与思考，这里只取最后一段（最终回答）。
- * trace 中 assistant 正文/思考的字符数与内容块按同一顺序产生，据此跳过已回放的部分。
- */
-const finalSegment = (reply: AssistantMessage) => {
-  let textBudget = 0
-  let thinkingBudget = 0
-  for (const message of reply.toolTrace ?? []) {
-    if (message.role !== 'assistant') {
-      continue
-    }
-    textBudget += message.content.length
-    thinkingBudget += message.reasoning?.length ?? 0
+/** 旧消息没有轨迹时：正文与思考按块拼接，保留块之间的段落分隔 */
+const legacySegment = (reply: AssistantMessage) => {
+  const texts = reply.blocks.filter((block): block is TextPart => block.type === 'text')
+  const thinking = reply.blocks.filter(
+    (block): block is ThinkingPart => block.type === 'thinking' && block.thinking.trim() !== ''
+  )
+  return {
+    text: texts.map((block) => block.text).join('\n\n'),
+    reasoning: thinking.map((block) => block.thinking).join('\n\n'),
+    signature: thinking.find((block) => block.signature)?.signature,
   }
-  const texts: string[] = []
-  const thinking: ThinkingPart[] = []
-  for (const block of reply.blocks) {
-    if (block.type === 'text') {
-      if (textBudget >= block.text.length) {
-        textBudget -= block.text.length
-        continue
-      }
-      texts.push(textBudget > 0 ? block.text.slice(textBudget) : block.text)
-      textBudget = 0
-    } else if (block.type === 'thinking') {
-      if (thinkingBudget >= block.thinking.length) {
-        thinkingBudget -= block.thinking.length
-        continue
-      }
-      const rest = thinkingBudget > 0 ? block.thinking.slice(thinkingBudget) : block.thinking
-      thinkingBudget = 0
-      if (rest.trim()) {
-        thinking.push({ ...block, thinking: rest })
-      }
-    }
-  }
-  return { texts, thinking }
 }
 
 /**
- * 工具调用必须与结果成对。应用在工具返回前被关闭时，落库的轨迹可能只留下调用，
- * 回放前补齐占位结果并丢弃没有调用的孤立结果，避免整个请求被服务端拒绝。
+ * 按步骤消费 blocks 里的正文与思考：轨迹只记录各步的字符数，内容本身不重复存储。
+ * 正文与思考各有一个游标，同一步里交叉出现的块也能按流式顺序取回。
  */
-const completeTrace = (trace: ProviderMessage[]): ProviderMessage[] => {
-  const out: ProviderMessage[] = []
-  for (let index = 0; index < trace.length; index++) {
-    const message = trace[index]
-    // 孤立结果没有可对应的调用，不能回放
-    if (message.role === 'tool') {
-      continue
+const createReader = (blocks: ReplyBlock[]) => {
+  const texts = blocks.filter((block): block is TextPart => block.type === 'text')
+  const thinking = blocks.filter((block): block is ThinkingPart => block.type === 'thinking')
+  let textIndex = 0
+  let textOffset = 0
+  let thinkingIndex = 0
+  let thinkingOffset = 0
+  const takeText = (length: number): string => {
+    let out = ''
+    while (length > 0 && textIndex < texts.length) {
+      const block = texts[textIndex]
+      const take = block.text.slice(textOffset, textOffset + length)
+      out += take
+      length -= take.length
+      textOffset += take.length
+      if (textOffset >= block.text.length) {
+        textIndex += 1
+        textOffset = 0
+      }
     }
-    out.push(message)
-    if (message.role !== 'assistant' || !message.toolCalls?.length) {
-      continue
+    return out
+  }
+  const takeThinking = (length: number): { text: string; signature?: string } => {
+    let out = ''
+    let signature: string | undefined
+    while (length > 0 && thinkingIndex < thinking.length) {
+      const block = thinking[thinkingIndex]
+      const take = block.thinking.slice(thinkingOffset, thinkingOffset + length)
+      out += take
+      length -= take.length
+      thinkingOffset += take.length
+      if (block.signature) {
+        signature = block.signature
+      }
+      if (thinkingOffset >= block.thinking.length) {
+        thinkingIndex += 1
+        thinkingOffset = 0
+      }
     }
-    const pending = new Map(message.toolCalls.map((call) => [call.id, call]))
-    while (index + 1 < trace.length && trace[index + 1].role === 'tool') {
-      const result = trace[++index]
-      if (result.role === 'tool' && pending.delete(result.toolCallId)) {
-        out.push(result)
+    return { text: out, signature }
+  }
+  return { takeText, takeThinking }
+}
+
+const toRoundMessages = (user: UserMessage, reply: AssistantMessage): ProviderMessage[] => {
+  const messages: ProviderMessage[] = [{ role: 'user', content: user.content }]
+  // 早期版本存过别的轨迹形状；没有可用步骤时按普通历史处理
+  const steps = (reply.toolTrace ?? []).filter((step) => Array.isArray(step.toolCalls))
+  if (steps.length === 0) {
+    const { text, reasoning, signature } = legacySegment(reply)
+    const content = [text, toolBlocksToText(reply)].filter(Boolean).join('\n\n')
+    if (content || reasoning) {
+      messages.push({
+        role: 'assistant',
+        content,
+        ...(reasoning ? { reasoning } : {}),
+        ...(signature ? { reasoningSignature: signature } : {}),
+      })
+    }
+    return messages
+  }
+
+  const reader = createReader(reply.blocks)
+  for (const step of steps) {
+    const text = reader.takeText(step.textLength)
+    const thinking = reader.takeThinking(step.reasoningLength)
+    const signature = step.reasoningSignature ?? thinking.signature
+    messages.push({
+      role: 'assistant',
+      content: text,
+      ...(step.toolCalls.length ? { toolCalls: step.toolCalls } : {}),
+      // 历史轮次同样回传思考与签名：DeepSeek 需要 reasoning_content 才能续接推理
+      ...(thinking.text ? { reasoning: thinking.text } : {}),
+      ...(signature ? { reasoningSignature: signature } : {}),
+    })
+    // 工具调用与结果必须成对：应用中断可能留下没有结果的调用，补齐占位避免请求被拒绝
+    const pending = new Map(step.toolCalls.map((call) => [call.id, call]))
+    for (const result of step.results) {
+      if (pending.delete(result.toolCallId)) {
+        messages.push({ role: 'tool', ...result })
       }
     }
     for (const [id, call] of pending) {
-      out.push({
+      messages.push({
         role: 'tool',
         toolCallId: id,
         name: call.name,
@@ -265,31 +289,19 @@ const completeTrace = (trace: ProviderMessage[]): ProviderMessage[] => {
       })
     }
   }
-  return out
-}
 
-const toRoundMessages = (user: UserMessage, reply: AssistantMessage): ProviderMessage[] => {
-  const trace = completeTrace(reply.toolTrace ?? [])
-  const { texts, thinking } = finalSegment(reply)
-  const text = texts.join('\n\n')
-  // 历史轮次同样回传思考与签名：DeepSeek 需要 reasoning_content 才能续接推理
-  const reasoning = thinking.map((block) => block.thinking).join('\n\n')
-  const reasoningSignature = thinking.find((block) => block.signature)?.signature
-  // 有原始轨迹时不再拼检索文本，避免同一批资料进上下文两次
-  const evidence = trace.length > 0 ? '' : toolBlocksToText(reply)
-  const content = [text, evidence].filter(Boolean).join('\n\n')
-  return [
-    { role: 'user', content: user.content },
-    // 工具调用与结果原样回放，模型看到的是上一轮真实的 function call 序列
-    ...trace,
-    {
+  // 轨迹之后剩下的正文与思考就是最终回答；没有内容时不补空 assistant，和 harness 一致
+  const text = reader.takeText(Infinity)
+  const thinking = reader.takeThinking(Infinity)
+  if (text || thinking.text) {
+    messages.push({
       role: 'assistant',
-      // 空正文但有思考时靠 reasoning 携带内容；两者都空时留占位，避免发出纯空消息。
-      content: content || (reasoning ? '' : '（本轮未产生正文）'),
-      ...(reasoning ? { reasoning } : {}),
-      ...(reasoningSignature ? { reasoningSignature } : {}),
-    },
-  ]
+      content: text,
+      ...(thinking.text ? { reasoning: thinking.text } : {}),
+      ...(thinking.signature ? { reasoningSignature: thinking.signature } : {}),
+    })
+  }
+  return messages
 }
 
 /** 调一次模型生成摘要；失败时返回 null，由调用方退化为截断 */
@@ -369,8 +381,8 @@ const attachmentNote = (files: AttachmentRef[], ocrEnabled: boolean): string => 
 
 /**
  * 组装发给模型的 messages：
- * 1. 全量历史按轮次展开，超预算时先把工具输出裁剪到 8K/4K/1K；
- * 2. 仍然超预算，就把较早的轮次压成一份摘要，保留最近的 retain 预算；
+ * 1. 全量历史按轮次展开，工具结果原样回放、不裁剪；
+ * 2. 超预算时把较早的轮次压成一份摘要，保留最近的 retain 预算；
  * 3. 摘要失败（模型报错）时退化为“丢弃较早轮次”，保证请求能发出去。
  */
 export const buildProviderMessages = async ({
@@ -396,11 +408,6 @@ export const buildProviderMessages = async ({
     return out
   }
 
-  const pruned = (messages: ProviderMessage[]): ProviderMessage[] =>
-    messages.map((message) =>
-      message.role === 'tool' ? { ...message, content: pruneToolText(message.content) } : message
-    )
-
   const system: ProviderMessage = { role: 'system', content: systemPrompt }
   // 只为本轮真正声明的工具追加说明，避免提到不存在的工具
   const hints = tools?.map((tool) => TOOL_HINTS[tool.name]).filter(Boolean) ?? []
@@ -420,7 +427,7 @@ export const buildProviderMessages = async ({
     return messages
   }
 
-  let body = pruned(flatten(0))
+  let body = flatten(0)
   let tokens = countTokens([system, ...(toolHint ? [toolHint] : []), ...body])
   if (tokens <= trigger) {
     return [system, ...(toolHint ? [toolHint] : []), ...head(body)]
@@ -437,8 +444,8 @@ export const buildProviderMessages = async ({
     }
     keepFrom = i
   }
-  const recent = pruned(flatten(keepFrom))
-  const olderMessages = pruned(flatten(0).slice(0, flatten(keepFrom).length))
+  const recent = flatten(keepFrom)
+  const olderMessages = flatten(0).slice(0, flatten(keepFrom).length)
   const summary = olderMessages.length ? await summarize(provider, model, olderMessages, signal) : null
   body = summary
     ? [{ role: 'user', content: summary }, ...recent]
@@ -446,7 +453,7 @@ export const buildProviderMessages = async ({
   tokens = countTokens([system, ...(toolHint ? [toolHint] : []), ...body])
   if (tokens > trigger) {
     // 摘要也压不下来：只保留最近一轮，保证请求可用
-    body = pruned(flatten(Math.max(0, rounds.length - 1)))
+    body = flatten(Math.max(0, rounds.length - 1))
   }
   return [system, ...(toolHint ? [toolHint] : []), ...head(body)]
 }

@@ -1,6 +1,6 @@
 import type { TranslationMessage } from '../../i18n/index.js'
 import type { ApiErrorKind } from '../api/client.js'
-import type { ProviderMessage } from '../providers/types.js'
+import type { ToolCall } from '../providers/types.js'
 import type {
   MessageUsage,
   ServerToolBlock,
@@ -93,6 +93,27 @@ export type ReplyBlock =
   | ToolErrorPart
   | AttachmentParsePart
 
+/** 一次本地工具调用回给模型的结果；content 是当时完整的工具输出 */
+export type ToolTraceResult = {
+  toolCallId: string
+  name: string
+  content: string
+}
+
+/**
+ * 回放本地 function call 需要的最小轨迹。
+ * 正文与思考仍留在 blocks 里，这里只记录该步占用的字符数，回放时按顺序取回，避免重复存储。
+ */
+export type ToolTraceStep = {
+  toolCalls: ToolCall[]
+  /** 该步正文在 blocks 中占的字符数 */
+  textLength: number
+  /** 该步思考在 blocks 中占的字符数 */
+  reasoningLength: number
+  reasoningSignature?: string
+  results: ToolTraceResult[]
+}
+
 /**
  * pending：已发出请求，还没收到事件；streaming：正在接收；
  * done：收到 message_stop；stopped：用户停止或页面关闭；error：请求或流出错
@@ -112,13 +133,13 @@ export type AssistantMessage = MessageBranch & {
   /** 本轮请求的系统信息快照；各回答版本独立保存，续写沿用。历史消息中缺省的快照保持为空。 */
   latestReminder?: string
   status: ReplyStatus
-  /** 可识别的内容块按接收顺序排列；续写产生的块追加在已有块之后 */
+  /** 可识别的内容块按接收顺序排列 */
   blocks: ReplyBlock[]
   /**
-   * 本轮本地 function call 的原始消息：assistant 工具调用与对应的 tool 结果，按产生顺序排列。
-   * 回放历史时原样送回模型；早期没有该字段的消息退化为把检索结果拼成文本。
+   * 本轮本地 function call 的轨迹，按产生顺序排列；正文与思考按字符数与 blocks 对齐回放。
+   * 早期没有该字段的消息退化为把检索结果拼成文本。
    */
-  toolTrace?: ProviderMessage[]
+  toolTrace?: ToolTraceStep[]
   stopReason?: StopReason
   stopDetails?: StopDetails
   /** 最近一次请求的用量，续写后更新 */

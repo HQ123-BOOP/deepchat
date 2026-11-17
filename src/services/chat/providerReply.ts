@@ -14,7 +14,7 @@ import type {
   ReasoningEffort,
   ToolSchema,
 } from '../providers/types.js'
-import type { AssistantMessage, ReplyBlock } from './types.js'
+import type { AssistantMessage, ReplyBlock, ToolTraceStep } from './types.js'
 import type {
   ServerToolUseBlock,
   WebSearchResult,
@@ -49,6 +49,38 @@ export type ProviderReplyOptions = {
 }
 
 const toolUseId = (callId: string) => `toolu_local_${callId}`
+
+/**
+ * 把 trace 消息压成步骤记录：正文和思考已经在 blocks 里，只保留字符数与签名，
+ * 避免同一段内容在会话里存两份。
+ */
+const appendTrace = (
+  trace: ToolTraceStep[] | undefined,
+  message: ProviderMessage
+): ToolTraceStep[] => {
+  const steps = trace ? [...trace] : []
+  if (message.role === 'assistant') {
+    steps.push({
+      toolCalls: message.toolCalls ?? [],
+      textLength: message.content.length,
+      reasoningLength: message.reasoning?.length ?? 0,
+      ...(message.reasoningSignature ? { reasoningSignature: message.reasoningSignature } : {}),
+      results: [],
+    })
+  } else if (message.role === 'tool') {
+    const last = steps.at(-1)
+    if (last) {
+      steps[steps.length - 1] = {
+        ...last,
+        results: [
+          ...last.results,
+          { toolCallId: message.toolCallId, name: message.name, content: message.content },
+        ],
+      }
+    }
+  }
+  return steps
+}
 
 const searchInput = (args: Record<string, unknown>): ServerToolUseBlock['input'] => {
   const query = typeof args.query === 'string' ? args.query : ''
@@ -138,8 +170,10 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
       } else if (event.type === 'reasoning_signature') {
         attachReasoningSignature(event.signature)
       } else if (event.type === 'trace') {
-        // function call 与结果原样留在回复里，随会话落库；回放历史时按原顺序送回模型
-        reply = { ...reply, toolTrace: [...(reply.toolTrace ?? []), ...event.messages] }
+        // function call 与结果按步骤落库；正文和思考不重复存，回放时按长度从 blocks 取回
+        for (const message of event.messages) {
+          reply = { ...reply, toolTrace: appendTrace(reply.toolTrace, message) }
+        }
         options.onChange(reply)
       } else if (event.type === 'tool_start') {
         // 工具调用说明思考阶段已结束

@@ -35,7 +35,7 @@ chat_sessions/{session_id}_files/{file_id}_{file_name}  全部图片原件
 - 错误回复的模板文案显示为红字和感叹号提示，正文和思考独立展示。拒绝及其他非错误模板使用正文样式，拒绝回复丢弃普通正文和思考，可复制模板，不能重新生成。模板统一单独展示，不混入工具步骤前的说明文字。
 - 错误与模板回复保留在消息树中，其所在轮次不进入后续请求上下文。
 - 已完成或已停止、有正文或工具轨迹、非拒绝且不含服务端模板的回复可以进入上下文；空正文但含思考或工具调用的轮次同样保留。
-- 上下文按轮次组装并做预算压缩，见 [../providerContext.ts](../providerContext.ts)；本机 function call 与结果保存在回复的 `toolTrace` 里原样回放。
+- 上下文按轮次组装并做预算压缩，见 [../providerContext.ts](../providerContext.ts)；本机 function call 以紧凑步骤记录保存在回复的 `toolTrace` 里，正文与思考仍留在 `blocks`，回放时按字符数取回。
 
 ## 导出范围
 
