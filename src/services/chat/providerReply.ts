@@ -140,6 +140,7 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
       } else if (event.type === 'tool_start') {
         // 工具调用说明思考阶段已结束
         closeThinking(Date.now())
+        const round = event.round
         // 附件解析先占一行「解析中」，完成后再补页数与字符数
         if (event.call.name === 'ocr_file') {
           let args: Record<string, unknown> = {}
@@ -187,6 +188,7 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
             : searchInput(args),
           caller: { type: 'direct' },
           kind: isRead ? 'read_link' : 'search',
+          round,
         } as ServerToolUseBlock)
         options.onChange(reply)
       } else if (event.type === 'tool_result') {

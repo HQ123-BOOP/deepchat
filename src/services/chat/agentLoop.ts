@@ -24,10 +24,12 @@ export type AgentEvent =
   | { type: 'text'; text: string }
   | { type: 'reasoning'; text: string }
   | { type: 'reasoning_signature'; signature: string }
-  | { type: 'tool_start'; call: ToolCall }
+  /** round = ReAct 循环的第几轮，同一轮内的多个工具调用可合并展示 */
+  | { type: 'tool_start'; call: ToolCall; round: number }
   | {
       type: 'tool_result'
       call: ToolCall
+      round: number
       sources: ToolSource[]
       ok: boolean
       error?: string
@@ -136,7 +138,7 @@ export async function* runAgent(
       ...(reasoningSignature ? { reasoningSignature } : {}),
     })
     for (const call of pending) {
-      yield { type: 'tool_start', call }
+      yield { type: 'tool_start', call, round: step }
       let content: string
       let sources: ToolSource[] = []
       let attachment: AttachmentSummary | undefined
@@ -161,6 +163,7 @@ export async function* runAgent(
         yield {
           type: 'tool_result',
           call,
+          round: step,
           sources,
           ok,
           error: failure.message,
@@ -169,7 +172,7 @@ export async function* runAgent(
         messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content })
         continue
       }
-      yield { type: 'tool_result', call, sources, ok, attachment }
+      yield { type: 'tool_result', call, round: step, sources, ok, attachment }
       messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content })
     }
 

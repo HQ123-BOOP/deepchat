@@ -52,6 +52,8 @@ export type ServerToolUseBlock = {
   input: ServerToolInput
   caller: { type: 'direct' }
   kind: ServerToolKind
+  /** 客户端 ReAct 循环的轮次序号；同一轮内的同工具调用合并展示，缺省按独立处理 */
+  round?: number
 }
 
 export type WebSearchResult = {
