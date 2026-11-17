@@ -7,11 +7,16 @@
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
-pub struct Db(Mutex<Connection>);
+pub struct Db {
+    conn: Mutex<Connection>,
+    /// 会话分块写入的临时缓冲：会话 JSON 可能达到数 MB，不能一次塞进 IPC。
+    writes: Mutex<HashMap<String, String>>,
+}
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS sessions (
@@ -72,8 +77,13 @@ fn open_connection(path: &Path) -> Result<Connection, String> {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
-    conn.pragma_update(None, "journal_mode", "WAL").map_err(|e| e.to_string())?;
-    conn.pragma_update(None, "synchronous", "NORMAL").map_err(|e| e.to_string())?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .map_err(|e| e.to_string())?;
+    // 会话与附件都要可靠落盘：进程被系统杀掉时 NORMAL 会丢最近事务。
+    conn.pragma_update(None, "synchronous", "FULL")
+        .map_err(|e| e.to_string())?;
     conn.execute_batch(SCHEMA).map_err(|e| e.to_string())?;
     Ok(conn)
 }
@@ -81,7 +91,10 @@ fn open_connection(path: &Path) -> Result<Connection, String> {
 pub fn init(app: &tauri::App) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let conn = open_connection(&dir.join("chat.sqlite3"))?;
-    app.manage(Db(Mutex::new(conn)));
+    app.manage(Db {
+        conn: Mutex::new(conn),
+        writes: Mutex::new(HashMap::new()),
+    });
     Ok(())
 }
 
@@ -100,7 +113,8 @@ pub struct LoadedFile {
     data: String,
 }
 
-/// 会话保存参数：data / summary 为前端序列化好的 JSON 文本；title 与 search_text 单列供搜索。
+/// 会话保存参数：data 为前端序列化的会话 JSON；搜索文本在 Rust 侧从 JSON 提取，
+/// 避免把大段文本再走一次 IPC。
 #[derive(Deserialize)]
 pub struct SessionSave {
     #[serde(rename = "sessionId")]
@@ -112,10 +126,78 @@ pub struct SessionSave {
     updated_at: i64,
     data: String,
     summary: String,
-    #[serde(rename = "searchText", default)]
-    search_text: String,
     #[serde(default)]
     files: Vec<DbFile>,
+}
+
+/// 从会话 JSON 提取搜索文本：标题、用户提问、助手正文与思考、工具调用的查询词与网址。
+/// 与旧前端逻辑一致，只保留前 8M 字符，避免异常长会话把库撑大。
+fn extract_search_text(data: &str, title: &str) -> String {
+    const MAX_CHARS: usize = 8 * 1024 * 1024;
+    let mut parts: Vec<String> = vec![title.to_string()];
+    let mut size = title.len();
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
+        if let Some(messages) = value.get("messages").and_then(|v| v.as_array()) {
+            'messages: for message in messages {
+                let role = message.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                if role == "user" {
+                    if let Some(text) = message.get("content").and_then(|v| v.as_str()) {
+                        if !text.is_empty() {
+                            parts.push(text.to_string());
+                            size += text.len();
+                        }
+                    }
+                    continue;
+                }
+                if role != "assistant" {
+                    continue;
+                }
+                let Some(blocks) = message.get("blocks").and_then(|v| v.as_array()) else {
+                    continue;
+                };
+                for block in blocks {
+                    match block.get("type").and_then(|v| v.as_str()) {
+                        Some("text") => {
+                            if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                                parts.push(text.to_string());
+                                size += text.len();
+                            }
+                        }
+                        Some("thinking") => {
+                            if let Some(text) = block.get("thinking").and_then(|v| v.as_str()) {
+                                parts.push(text.to_string());
+                                size += text.len();
+                            }
+                        }
+                        Some("server_tool_use") => {
+                            let Some(input) = block.get("input") else { continue };
+                            if let Some(queries) = input.get("queries").and_then(|v| v.as_array()) {
+                                for query in queries {
+                                    if let Some(query) = query.as_str() {
+                                        parts.push(query.to_string());
+                                        size += query.len();
+                                    }
+                                }
+                            }
+                            if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
+                                parts.push(url.to_string());
+                                size += url.len();
+                            }
+                            if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
+                                parts.push(pattern.to_string());
+                                size += pattern.len();
+                            }
+                        }
+                        _ => {}
+                    }
+                    if size > MAX_CHARS {
+                        break 'messages;
+                    }
+                }
+            }
+        }
+    }
+    parts.join(" ")
 }
 
 #[derive(Serialize)]
@@ -171,6 +253,7 @@ fn collect_snippets(title: &str, body: &str, needle: &str, limit: usize) -> (i64
 }
 
 fn upsert_session(conn: &Connection, save: &SessionSave, staging: bool) -> Result<(), String> {
+    let search_text = extract_search_text(&save.data, &save.title);
     if staging {
         conn.execute(
             "INSERT INTO sessions_staging (id, title, created_at, updated_at, data, summary, search_text)
@@ -183,7 +266,7 @@ fn upsert_session(conn: &Connection, save: &SessionSave, staging: bool) -> Resul
                 save.updated_at,
                 save.data,
                 save.summary,
-                save.search_text
+                search_text
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -204,7 +287,7 @@ fn upsert_session(conn: &Connection, save: &SessionSave, staging: bool) -> Resul
     conn.execute(
         "INSERT INTO search_texts (session_id, title, body, updated_at) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(session_id) DO UPDATE SET title=?2, body=?3, updated_at=?4",
-        params![save.session_id, save.title, save.search_text, save.updated_at],
+        params![save.session_id, save.title, search_text, save.updated_at],
     )
     .map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM file_refs WHERE session_id = ?1", params![save.session_id])
@@ -247,7 +330,7 @@ pub fn db_load_summaries_page(
     before_updated_at: Option<i64>,
     before_id: Option<String>,
 ) -> Result<Vec<String>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
             "SELECT summary FROM session_summaries
@@ -270,7 +353,7 @@ pub fn db_load_summaries_page(
 /// 读取单个会话的完整 JSON
 #[tauri::command]
 pub fn db_load_session(db: State<'_, Db>, id: String) -> Result<Option<String>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.query_row("SELECT data FROM sessions WHERE id = ?1", params![id], |row| {
         row.get::<_, String>(0)
     })
@@ -281,17 +364,110 @@ pub fn db_load_session(db: State<'_, Db>, id: String) -> Result<Option<String>, 
 /// 保存会话：整会话 JSON + 摘要 + 附件 + 搜索文本，一个事务
 #[tauri::command]
 pub fn db_save_session(db: State<'_, Db>, save: SessionSave) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     upsert_session(&tx, &save, false)?;
     save_files(&tx, "files", &save.files)?;
     tx.commit().map_err(|e| e.to_string())
 }
 
+/// 开启一次分块会话写入。会话 JSON 可能有数 MB，Android 的 IPC 不适合一次传输。
+#[tauri::command]
+pub fn db_session_write_begin(db: State<'_, Db>, id: String) -> Result<(), String> {
+    db.writes
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(id, String::new());
+    Ok(())
+}
+
+/// 追加分块内容（每块建议不超过 256K 字符）
+#[tauri::command]
+pub fn db_session_write_chunk(db: State<'_, Db>, id: String, chunk: String) -> Result<(), String> {
+    let mut writes = db.writes.lock().map_err(|e| e.to_string())?;
+    let buffer = writes
+        .get_mut(&id)
+        .ok_or_else(|| "session write buffer is not open".to_string())?;
+    buffer.push_str(&chunk);
+    Ok(())
+}
+
+/// 提交分块写入：用缓冲内容替换 data，一个事务写会话、摘要和附件
+#[tauri::command]
+pub fn db_session_write_commit(db: State<'_, Db>, save: SessionSave) -> Result<(), String> {
+    let data = db
+        .writes
+        .lock()
+        .map_err(|e| e.to_string())?
+        .remove(&save.session_id)
+        .ok_or_else(|| "session write buffer is missing".to_string())?;
+    let save = SessionSave { data, ..save };
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    upsert_session(&tx, &save, false)?;
+    save_files(&tx, "files", &save.files)?;
+    tx.commit().map_err(|e| e.to_string())
+}
+
+/// 会话 JSON 的字符长度（用于分块读取）；不存在时返回 null。
+/// 用 UTF-16 码元计数，与 JS 字符串下标一致（emoji 会占两个码元）。
+#[tauri::command]
+pub fn db_load_session_len(db: State<'_, Db>, id: String) -> Result<Option<usize>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let data: Option<String> = conn
+        .query_row("SELECT data FROM sessions WHERE id = ?1", params![id], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(data.map(|value| value.encode_utf16().count()))
+}
+
+/// 按 UTF-16 码元偏移读取会话 JSON 的一块，边界对齐到完整字符。
+#[tauri::command]
+pub fn db_load_session_chunk(
+    db: State<'_, Db>,
+    id: String,
+    offset: usize,
+    len: usize,
+) -> Result<String, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let data: Option<String> = conn
+        .query_row("SELECT data FROM sessions WHERE id = ?1", params![id], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let data = data.ok_or_else(|| "session not found".to_string())?;
+    Ok(utf16_chunk(&data, offset, len))
+}
+
+fn utf16_chunk(text: &str, offset: usize, max_len: usize) -> String {
+    let end_limit = offset + max_len;
+    let mut units = 0usize;
+    let mut start: Option<usize> = None;
+    let mut end = text.len();
+    for (index, ch) in text.char_indices() {
+        let width = ch.len_utf16();
+        if start.is_none() && units >= offset {
+            start = Some(index);
+        }
+        if start.is_some() && units + width > end_limit {
+            end = index;
+            break;
+        }
+        units += width;
+    }
+    match start {
+        Some(start) if start <= end => text[start..end].to_string(),
+        _ => String::new(),
+    }
+}
+
 /// 删除会话：同时清理搜索文本与不再被引用的附件
 #[tauri::command]
 pub fn db_delete_session(db: State<'_, Db>, id: String) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let summary: Option<String> = conn
         .query_row(
             "SELECT summary FROM session_summaries WHERE id = ?1",
@@ -334,7 +510,7 @@ pub fn db_delete_session(db: State<'_, Db>, id: String) -> Result<(), String> {
 /// 保存附件（新增附件时写入）
 #[tauri::command]
 pub fn db_save_files(db: State<'_, Db>, files: Vec<DbFile>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     save_files(&tx, "files", &files)?;
     tx.commit().map_err(|e| e.to_string())
@@ -343,7 +519,7 @@ pub fn db_save_files(db: State<'_, Db>, files: Vec<DbFile>) -> Result<(), String
 /// 读取附件原件
 #[tauri::command]
 pub fn db_load_file(db: State<'_, Db>, id: String) -> Result<Option<LoadedFile>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.query_row("SELECT mime, bytes FROM files WHERE id = ?1", params![id], |row| {
         let mime: String = row.get(0)?;
         let bytes: Vec<u8> = row.get(1)?;
@@ -356,7 +532,7 @@ pub fn db_load_file(db: State<'_, Db>, id: String) -> Result<Option<LoadedFile>,
 /// 保存一份 OCR 识别文本（doc 为前端序列化的 StoredFileText JSON）
 #[tauri::command]
 pub fn db_save_file_text(db: State<'_, Db>, id: String, doc: String) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO file_texts (id, doc) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET doc=?2",
         params![id, doc],
@@ -368,7 +544,7 @@ pub fn db_save_file_text(db: State<'_, Db>, id: String, doc: String) -> Result<(
 /// 读取 OCR 识别文本
 #[tauri::command]
 pub fn db_load_file_text(db: State<'_, Db>, id: String) -> Result<Option<String>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.query_row("SELECT doc FROM file_texts WHERE id = ?1", params![id], |row| {
         row.get::<_, String>(0)
     })
@@ -379,7 +555,7 @@ pub fn db_load_file_text(db: State<'_, Db>, id: String) -> Result<Option<String>
 /// 清空导入暂存
 #[tauri::command]
 pub fn db_clear_staging(db: State<'_, Db>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM sessions_staging", []).map(|_| ()).map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM files_staging", []).map(|_| ()).map_err(|e| e.to_string())
 }
@@ -387,14 +563,14 @@ pub fn db_clear_staging(db: State<'_, Db>) -> Result<(), String> {
 /// 暂存一条导入的会话（含摘要与搜索文本）
 #[tauri::command]
 pub fn db_add_staging_session(db: State<'_, Db>, save: SessionSave) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     upsert_session(&conn, &save, true)
 }
 
 /// 批量暂存导入的会话：一个事务写一批，避免逐条 IPC 与逐条事务的开销
 #[tauri::command]
 pub fn db_add_staging_sessions(db: State<'_, Db>, saves: Vec<SessionSave>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     for save in &saves {
         upsert_session(&tx, save, true)?;
@@ -405,7 +581,7 @@ pub fn db_add_staging_sessions(db: State<'_, Db>, saves: Vec<SessionSave>) -> Re
 /// 批量暂存导入的附件
 #[tauri::command]
 pub fn db_save_staging_files(db: State<'_, Db>, files: Vec<DbFile>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     save_files(&tx, "files_staging", &files)?;
     tx.commit().map_err(|e| e.to_string())
@@ -417,7 +593,7 @@ pub fn db_update_staging_file_types(
     db: State<'_, Db>,
     types: Vec<(String, String)>,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let map: std::collections::HashMap<String, String> = types.into_iter().collect();
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let rows: Vec<(String, String)> = {
@@ -466,7 +642,7 @@ pub fn db_update_staging_file_types(
 /// 用暂存替换正式数据（一个事务）；返回全部会话的摘要 JSON 列表
 #[tauri::command]
 pub fn db_commit_staging(db: State<'_, Db>) -> Result<Vec<String>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM sessions", []).map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM session_summaries", []).map_err(|e| e.to_string())?;
@@ -551,7 +727,7 @@ pub fn db_search(db: State<'_, Db>, query: String) -> Result<Vec<SearchHit>, Str
     if trimmed.is_empty() {
         return Ok(Vec::new());
     }
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT session_id, title, body, updated_at FROM search_texts")
         .map_err(|e| e.to_string())?;
@@ -582,4 +758,62 @@ pub fn db_search(db: State<'_, Db>, query: String) -> Result<Vec<SearchHit>, Str
         .collect();
     hits.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     Ok(hits)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 分块必须能无损拼回原文，且不切开代理对
+    #[test]
+    fn utf16_chunks_roundtrip() {
+        let text = "{\"title\":\"你好😀世界𠮷\",\"text\":\"emoji 🚀 and ascii\"}".repeat(200);
+        let total = text.encode_utf16().count();
+        let mut rebuilt = String::new();
+        let mut offset = 0usize;
+        while offset < total {
+            let chunk = utf16_chunk(&text, offset, 997);
+            assert!(!chunk.is_empty());
+            rebuilt.push_str(&chunk);
+            offset += chunk.encode_utf16().count();
+        }
+        assert_eq!(rebuilt, text);
+    }
+
+    /// 会话写入后按分块读取应得到完整 JSON
+    #[test]
+    fn session_chunked_roundtrip() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        let data = "{\"id\":\"s1\",\"title\":\"测试😀\",\"messages\":[{\"role\":\"user\",\"content\":\"你好\"}]}";
+        let save = SessionSave {
+            session_id: "s1".into(),
+            title: "测试😀".into(),
+            created_at: 1,
+            updated_at: 2,
+            data: data.into(),
+            summary: "{\"id\":\"s1\",\"fileIds\":[]}".into(),
+            files: Vec::new(),
+        };
+        upsert_session(&conn, &save, false).unwrap();
+
+        let stored: String = conn
+            .query_row("SELECT data FROM sessions WHERE id='s1'", [], |row| row.get(0))
+            .unwrap();
+        let total = stored.encode_utf16().count();
+        let mut rebuilt = String::new();
+        let mut offset = 0usize;
+        while offset < total {
+            let chunk = utf16_chunk(&stored, offset, 11);
+            rebuilt.push_str(&chunk);
+            offset += chunk.encode_utf16().count();
+        }
+        assert_eq!(rebuilt, data);
+
+        // 搜索文本由 Rust 从会话 JSON 提取
+        let body: String = conn
+            .query_row("SELECT body FROM search_texts WHERE session_id='s1'", [], |row| row.get(0))
+            .unwrap();
+        assert!(body.contains("你好"));
+    }
 }

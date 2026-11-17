@@ -36,10 +36,10 @@ if (typeof indexedDB !== 'undefined') {
   })()
 }
 
-/** Uint8Array → base64：按块 btoa，避免一次编码大文件时超出参数长度限制。 */
+/** Uint8Array → base64：按块 btoa，块小一些避免 Android WebView 的参数栈上限。 */
 const bytesToBase64 = (bytes: Uint8Array): string => {
   let binary = ''
-  const chunk = 0x8000
+  const chunk = 0x2000
   for (let index = 0; index < bytes.length; index += chunk) {
     binary += String.fromCharCode(...bytes.subarray(index, index + chunk))
   }
@@ -55,38 +55,6 @@ const base64ToBytes = (data: string): Uint8Array => {
   return bytes
 }
 
-/**
- * 抽取会话的全部可搜索文本：用户提问、助手正文与思考、工具调用的查询词与网址。
- * 搜索在 Rust 侧对这段拼接文本做大小写不敏感的子串匹配。
- */
-const extractSearchText = (session: Session): string => {
-  const parts: string[] = [session.title]
-  for (const message of session.messages) {
-    if (message.role === 'user') {
-      if (message.content) {
-        parts.push(message.content)
-      }
-      continue
-    }
-    for (const block of message.blocks) {
-      if (block.type === 'text') {
-        parts.push(block.text)
-      } else if (block.type === 'thinking') {
-        parts.push(block.thinking)
-      } else if (block.type === 'server_tool_use') {
-        if (block.input.action === 'search') {
-          parts.push(...block.input.queries)
-        } else if (block.input.url) {
-          parts.push(block.input.url)
-        }
-        if ('pattern' in block.input && block.input.pattern) {
-          parts.push(block.input.pattern)
-        }
-      }
-    }
-  }
-  return parts.join(' ')
-}
 
 /** 附件字节转传输结构 */
 const toDbFile = async (file: { id: string; blob: Blob }) => {
@@ -142,37 +110,99 @@ export const loadSessionSummariesPage = async (
 }
 
 export const loadSession = async (id: string): Promise<Session | undefined> => {
-  const data = await invoke<string | null>('db_load_session', { id })
-  return data === null ? undefined : (JSON.parse(data) as Session)
+  // 分块读取：长会话的 JSON 可能数 MB，一次读取在移动端会失败或卡住
+  const total = await invoke<number | null>('db_load_session_len', { id })
+  if (total === null) {
+    return undefined
+  }
+  let text = ''
+  for (let offset = 0; offset < total; offset += CHUNK_CHARS) {
+    text += await invoke<string>('db_load_session_chunk', {
+      id,
+      offset,
+      len: CHUNK_CHARS,
+    })
+  }
+  return JSON.parse(text) as Session
 }
 
-export const saveSession = async (session: Session, files: StoredFile[] = []): Promise<void> => {
-  const summary = {
-    id: session.id,
-    title: session.title,
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
-    mode: session.mode,
-    fileIds: [
-      ...new Set(
-        session.messages.flatMap((message) =>
-          message.role === 'user' ? message.files.map((file) => file.id) : []
-        )
-      ),
-    ],
+/** 分块大小（UTF-16 码元）：Android 的 IPC 不适合一次传数 MB 的 JSON */
+const CHUNK_CHARS = 256 * 1024
+
+/** 按码元切块，但不把代理对（emoji）切开，否则单块 JSON 可能产生孤立代理项 */
+const chunksOf = (text: string): string[] => {
+  const chunks: string[] = []
+  let start = 0
+  while (start < text.length) {
+    let end = Math.min(start + CHUNK_CHARS, text.length)
+    if (end < text.length) {
+      const code = text.charCodeAt(end - 1)
+      if (code >= 0xd800 && code <= 0xdbff) {
+        end -= 1
+      }
+    }
+    if (end <= start) {
+      break
+    }
+    chunks.push(text.slice(start, end))
+    start = end
   }
-  await invoke('db_save_session', {
-    save: {
-      sessionId: session.id,
-      title: session.title,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-      data: JSON.stringify(session),
-      summary: JSON.stringify(summary),
-      searchText: extractSearchText(session),
-      files: await Promise.all(files.map(toDbFile)),
-    },
+  return chunks
+}
+
+/** 每个会话一条写入队列：保证后发起的保存一定后落库，避免旧快照覆盖新数据。 */
+const saveQueues = new Map<string, Promise<void>>()
+
+const summaryOf = (session: Session) => ({
+  id: session.id,
+  title: session.title,
+  createdAt: session.createdAt,
+  updatedAt: session.updatedAt,
+  mode: session.mode,
+  fileIds: [
+    ...new Set(
+      session.messages.flatMap((message) =>
+        message.role === 'user' ? message.files.map((file) => file.id) : []
+      )
+    ),
+  ],
+})
+
+/**
+ * 保存会话：分块写入，附件单独走 db_save_files。
+ * 附件读取或传输失败不会再让整个会话写不进去；同一会话的写入串行执行。
+ */
+export const saveSession = async (session: Session, files: StoredFile[] = []): Promise<void> => {
+  const previous = saveQueues.get(session.id) ?? Promise.resolve()
+  const task = previous.catch(() => {}).then(async () => {
+    if (files.length > 0) {
+      await invoke('db_save_files', { files: await Promise.all(files.map(toDbFile)) })
+    }
+    const payload = JSON.stringify(session)
+    await invoke('db_session_write_begin', { id: session.id })
+    for (const chunk of chunksOf(payload)) {
+      await invoke('db_session_write_chunk', { id: session.id, chunk })
+    }
+    await invoke('db_session_write_commit', {
+      save: {
+        sessionId: session.id,
+        title: session.title,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        data: '',
+        summary: JSON.stringify(summaryOf(session)),
+        files: [],
+      },
+    })
   })
+  saveQueues.set(session.id, task)
+  try {
+    await task
+  } finally {
+    if (saveQueues.get(session.id) === task) {
+      saveQueues.delete(session.id)
+    }
+  }
 }
 
 /** 未打开的会话也可重命名：读取、改标题后整会话回存。 */
@@ -220,35 +250,38 @@ export const addStagingSession = async (session: Session): Promise<void> => {
   await addStagingSessions([session])
 }
 
-/** 批量暂存：一次 IPC 写一批会话，导入大归档时避免逐条往返 */
+/**
+ * 批量暂存：按序列化后的字节数切批（每批不超过约 400K 字符），
+ * 既避免逐条 IPC 往返，也避免移动端一次传输过大。
+ */
 export const addStagingSessions = async (sessions: Session[]): Promise<void> => {
-  const saves = sessions.map((session) => {
-    const summary = {
-      id: session.id,
-      title: session.title,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-      mode: session.mode,
-      fileIds: [
-        ...new Set(
-          session.messages.flatMap((message) =>
-            message.role === 'user' ? message.files.map((file) => file.id) : []
-          )
-        ),
-      ],
+  const saves = sessions.map((session) => ({
+    sessionId: session.id,
+    title: session.title,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    data: JSON.stringify(session),
+    summary: JSON.stringify(summaryOf(session)),
+    files: [],
+  }))
+  const BATCH_CHARS = 400 * 1024
+  let batch: typeof saves = []
+  let size = 0
+  const flush = async () => {
+    if (batch.length > 0) {
+      await invoke('db_add_staging_sessions', { saves: batch })
+      batch = []
+      size = 0
     }
-    return {
-      sessionId: session.id,
-      title: session.title,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-      data: JSON.stringify(session),
-      summary: JSON.stringify(summary),
-      searchText: extractSearchText(session),
-      files: [],
+  }
+  for (const save of saves) {
+    if (batch.length > 0 && size + save.data.length > BATCH_CHARS) {
+      await flush()
     }
-  })
-  await invoke('db_add_staging_sessions', { saves })
+    batch.push(save)
+    size += save.data.length
+  }
+  await flush()
 }
 
 export const saveStagingFiles = async (files: StoredFile[]): Promise<void> => {
