@@ -191,6 +191,43 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
     let fileBytes = 0
     let kept = 0
 
+    // 进度以「对话」为单位：会话 JSON 与它目录下的图片都处理完，这个对话才算完成
+    const totalConversations = keepIds.size
+    const imageTotals = new Map<string, number>()
+    for (const path of paths) {
+      const owner = /^chat_sessions\/([^/]+)_files\//.exec(path)?.[1]
+      if (owner !== undefined && keepIds.has(owner)) {
+        imageTotals.set(owner, (imageTotals.get(owner) ?? 0) + 1)
+      }
+    }
+    const jsonDone = new Set<string>()
+    const imagesSeen = new Map<string, number>()
+    const finishedIds = new Set<string>()
+    let finished = 0
+
+    // 解压按 64KB 回调一次；直接转发会让设置页每 64KB 重渲染一次，
+    // 二十来条会话就能堆出上千次渲染。这里按 120ms 节流。
+    let lastProgress = 0
+    const reportProgress = (done: number, total: number, force = false) => {
+      const now = Date.now()
+      if (!force && now - lastProgress < 120) {
+        return
+      }
+      lastProgress = now
+      options.onProgress?.({ done, total })
+    }
+    const maybeFinish = (sessionId: string) => {
+      if (finishedIds.has(sessionId) || !jsonDone.has(sessionId)) {
+        return
+      }
+      if ((imagesSeen.get(sessionId) ?? 0) < (imageTotals.get(sessionId) ?? 0)) {
+        return
+      }
+      finishedIds.add(sessionId)
+      finished += 1
+      reportProgress(finished, totalConversations)
+    }
+
     const flushBuffers = async () => {
       if (sessionBuffer.length > 0) {
         const batch = sessionBuffer.splice(0)
@@ -209,43 +246,36 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
         images.set(imagePath, id)
       }
       sessionBuffer.push(local.session)
+      jsonDone.add(local.session.id)
+      maybeFinish(local.session.id)
       if (sessionBuffer.length >= SESSION_BATCH) {
         void flushBuffers()
       }
     }
 
     const saveImage = async (entry: ArchiveEntry) => {
+      const owner = /^chat_sessions\/([^/]+)_files\//.exec(entry.path)?.[1]
       const id = images.get(entry.path)
-      // 未登记（未保留会话）或已保存过的图片：读完丢弃，保证条目被完整消费
       if (id === undefined || stored.has(id)) {
+        // 未登记（未保留会话）或已保存过的图片：读完丢弃，保证条目被完整消费
         await drainEntry(entry)
-        return
+      } else {
+        const data = await readEntryBlob(entry)
+        const type = imageType(new Uint8Array(await data.slice(0, 16).arrayBuffer()))
+        fileBuffer.push({ id, blob: new Blob([data as BlobPart], { type }) })
+        stored.set(id, type)
+        fileBytes += data.size
+        if (fileBuffer.length >= FILE_BATCH || fileBytes >= FILE_BATCH_BYTES) {
+          await flushBuffers()
+        }
       }
-      const data = await readEntryBlob(entry)
-      const type = imageType(new Uint8Array(await data.slice(0, 16).arrayBuffer()))
-      fileBuffer.push({ id, blob: new Blob([data as BlobPart], { type }) })
-      stored.set(id, type)
-      fileBytes += data.size
-      if (fileBuffer.length >= FILE_BATCH || fileBytes >= FILE_BATCH_BYTES) {
-        await flushBuffers()
+      if (owner !== undefined) {
+        imagesSeen.set(owner, (imagesSeen.get(owner) ?? 0) + 1)
+        maybeFinish(owner)
       }
     }
 
-    // 解压按 64KB 回调一次；直接转发会让设置页每 64KB 重渲染一次，
-    // 二十来条会话就能堆出上千次渲染。这里按 120ms 节流。
-    let lastProgress = 0
-    const reportProgress = (done: number, total: number, force = false) => {
-      const now = Date.now()
-      if (!force && now - lastProgress < 120) {
-        return
-      }
-      lastProgress = now
-      options.onProgress?.({ done, total })
-    }
-
-    for await (const entry of readSelectedArchive(file, keep, (done, total) =>
-      reportProgress(done, total)
-    )) {
+    for await (const entry of readSelectedArchive(file, keep)) {
       const sessionId = parseSessionPath(entry.path)
       if (sessionId !== null) {
         const local = toLocalSession(
@@ -262,6 +292,8 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
       await saveImage(entry)
     }
     await flushBuffers()
+    // 兜底：选中的会话都应有结果，避免异常条目让进度停在 99%
+    reportProgress(totalConversations, totalConversations, true)
     if (options.range.kind !== 'all' && kept === 0) {
       fail('backupEmptyRange')
     }
