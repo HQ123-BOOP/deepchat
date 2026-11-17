@@ -4,7 +4,6 @@ import logoUrl from '../../assets/deepchat.svg'
 import { useTranslate } from '../../i18n/index.js'
 import {
   IconPanelLeftOutline16,
-  IconPlusOutline16,
   IconSearchOutline16,
   IconSettingsOutline16,
 } from '../base/icons.js'
@@ -12,7 +11,7 @@ import { setSiderCollapsed } from '../../services/settings.js'
 import { appVersion } from '../../services/updates.js'
 import { openExternal } from '../../services/nativeMedia.js'
 import { groupSessions } from '../../services/chat/sessionGroups.js'
-import { loadMoreSessions, newChat, removeSession, useChatStore } from '../../services/chat/store.js'
+import { loadMoreSessions, removeSession, useChatStore } from '../../services/chat/store.js'
 import type { SessionSummary } from '../../services/chat/types.js'
 import { Button } from '../base/Button.js'
 import { IconButton } from '../base/IconButton.js'
@@ -89,15 +88,6 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
           <span className={styles.brandName}>DeepChat</span>
           <span className={styles.brandVersion}>v{appVersion()}</span>
         </div>
-        {!mobile ? (
-          <IconButton
-            size="m"
-            icon={<IconPlusOutline16 />}
-            tooltip={t('newChat')}
-            tooltipPlacement="bottom"
-            onClick={() => newChat()}
-          />
-        ) : null}
         <IconButton
           size="m"
           icon={<IconPanelLeftOutline16 />}
