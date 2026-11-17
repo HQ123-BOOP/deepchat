@@ -149,6 +149,7 @@ export const zh = {
   historyExporting: '正在导出...',
   historyExported: '导出完成',
   historyImporting: '正在导入...',
+  historyImportPreparing: '正在读取归档…',
   historyRangeLabel: '范围',
   historyRangeAll: '全部',
   historyRangeDays: '最近',

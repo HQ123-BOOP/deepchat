@@ -99,11 +99,24 @@ export const RangePicker = ({
   )
 }
 
-/** 一条细进度条 + 「已完成 / 总数」 */
-export const RangeProgress = ({ progress }: { progress: BackupProgress | null }) => {
+/** 一条细进度条 + 「已完成 / 总数」；准备阶段还没有进度，用不确定态提示正在读归档。 */
+export const RangeProgress = ({
+  progress,
+  preparing = false,
+}: {
+  progress: BackupProgress | null
+  preparing?: boolean
+}) => {
   const t = useTranslate()
   if (!progress || progress.total <= 0) {
-    return null
+    return preparing ? (
+      <div className={styles.progress} role="status" aria-live="polite">
+        <div className={`${styles.progressTrack} ${styles.progressIndeterminate}`}>
+          <div className={styles.progressBar} />
+        </div>
+        <div className={styles.progressText}>{t('historyImportPreparing')}</div>
+      </div>
+    ) : null
   }
   const percent = Math.min(100, Math.round((progress.done / progress.total) * 100))
   return (

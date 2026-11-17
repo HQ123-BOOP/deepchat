@@ -156,6 +156,7 @@ export const en = {
   historyExporting: 'Exporting...',
   historyExported: 'Export complete',
   historyImporting: 'Importing...',
+  historyImportPreparing: 'Reading archive…',
   historyRangeLabel: 'Range',
   historyRangeAll: 'All',
   historyRangeDays: 'Last',

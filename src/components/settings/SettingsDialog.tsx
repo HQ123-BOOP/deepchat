@@ -835,7 +835,10 @@ const ImportConfirm = ({
         onChange={historyImport.setRange}
         disabled={historyImport.busy}
       />
-      <RangeProgress progress={historyImport.progress} />
+      <RangeProgress
+        progress={historyImport.progress}
+        preparing={historyImport.busy && !historyImport.progress}
+      />
     </Modal>
   )
 }
