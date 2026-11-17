@@ -279,6 +279,16 @@ export const runProviderReply = async (options: ProviderReplyOptions): Promise<A
           options.onChange(reply)
           continue
         }
+        // read 的窗口：保留一行可点开的读取记录
+        if (event.read) {
+          pushBlock({
+            type: 'file_read',
+            id: toolUseId(event.call.id),
+            ...event.read,
+          })
+          options.onChange(reply)
+          continue
+        }
         // 解析完成后把「解析中」那一行替换成带页数与字符数的记录
         if (event.call.name === 'ocr_file') {
           if (event.attachment) {

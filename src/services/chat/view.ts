@@ -93,6 +93,18 @@ export type WorkspaceStep = {
   chars: number
 }
 
+/** 读取文件：显示读取范围，工作区文件可点开预览 */
+export type ReadFileStep = {
+  type: 'file_read'
+  key: string
+  kind: 'attachment' | 'workspace'
+  target: string
+  name: string
+  from: number
+  to: number
+  total: number
+}
+
 export type ThinkingStep = { type: 'thinking'; key: string; blocks: ThinkingPart[] }
 
 /** 工具调用前输出的说明文字 */
@@ -108,6 +120,7 @@ export type Step =
   | ToolErrorStep
   | AttachmentStep
   | WorkspaceStep
+  | ReadFileStep
 
 export type ReplyView = {
   steps: Step[]
@@ -316,6 +329,20 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
         path: block.path,
         operation: block.operation,
         chars: block.chars,
+      })
+      return
+    }
+    if (block.type === 'file_read') {
+      flushPreamble()
+      steps.push({
+        type: 'file_read',
+        key: block.id,
+        kind: block.kind,
+        target: block.target,
+        name: block.name,
+        from: block.from,
+        to: block.to,
+        total: block.total,
       })
       return
     }

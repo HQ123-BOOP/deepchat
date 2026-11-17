@@ -73,6 +73,7 @@ export const zh = {
   workspaceMissing: '文件已不存在',
   workspaceViewerTitle: '工作区文件',
   workspaceViewerMeta: '共 {count} 字符',
+  fileReadRange: '第 {from}–{to} 行（共 {total} 行）',
   toolSearchNoResult: '未搜索到合适内容',
   messageSearchNoResult: '未搜索到相关内容',
   toolSearch1Result: '搜索到 1 个网页',

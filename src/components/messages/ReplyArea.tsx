@@ -29,6 +29,7 @@ import {
   type FindStep,
   type OpenStep,
   type PageItem,
+  type ReadFileStep,
   type ReadLinkStep,
   type ReplyView,
   type SearchStep,
@@ -186,6 +187,8 @@ const StepItem = ({
       return <AttachmentRow step={step} isLast={isLast} />
     case 'workspace':
       return <WorkspaceRow step={step} sessionId={sessionId} isLast={isLast} />
+    case 'file_read':
+      return <ReadFileRow step={step} sessionId={sessionId} isLast={isLast} />
     default:
       return null
   }
@@ -405,6 +408,50 @@ const WorkspaceRow = ({
       </ToolRow>
       {text !== null ? (
         <WorkspaceFileViewer name={step.path} text={text} onClose={() => setText(null)} />
+      ) : null}
+    </>
+  )
+}
+
+/** 读取文件：显示文件名与行范围；工作区文件可点开预览 */
+const ReadFileRow = ({
+  step,
+  sessionId,
+  isLast,
+}: {
+  step: ReadFileStep
+  sessionId: string
+  isLast: boolean
+}) => {
+  const t = useTranslate()
+  const [text, setText] = useState<string | null>(null)
+  const open = async () => {
+    if (step.kind !== 'workspace') {
+      return
+    }
+    const next = await readWorkspaceFile(sessionId, step.target)
+    if (next === null) {
+      showToast({ key: 'workspaceMissing' })
+      return
+    }
+    setText(next)
+  }
+  return (
+    <>
+      <ToolRow icon={<IconFileOutline20 />} isLast={isLast}>
+        {step.kind === 'workspace' ? (
+          <button type="button" className={styles.attachment} onClick={open}>
+            {step.name}
+          </button>
+        ) : (
+          <span>{step.name}</span>
+        )}
+        <span className={styles.attachmentMeta}>
+          {t('fileReadRange', { from: step.from, to: step.to, total: step.total })}
+        </span>
+      </ToolRow>
+      {text !== null ? (
+        <WorkspaceFileViewer name={step.name} text={text} onClose={() => setText(null)} />
       ) : null}
     </>
   )

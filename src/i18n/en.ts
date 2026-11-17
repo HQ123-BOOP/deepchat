@@ -77,6 +77,7 @@ export const en = {
   workspaceMissing: 'File no longer exists',
   workspaceViewerTitle: 'Workspace file',
   workspaceViewerMeta: '{count} characters',
+  fileReadRange: 'lines {from}-{to} of {total}',
   toolSearchNoResult: 'No suitable results found',
   messageSearchNoResult: 'No relevant results found',
   toolSearch1Result: 'Found 1 web page',

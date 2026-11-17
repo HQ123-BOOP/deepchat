@@ -95,6 +95,18 @@ export type WorkspaceFilePart = {
   chars: number
 }
 
+/** read 的窗口记录：附件或工作区文件读取了哪些行 */
+export type FileReadPart = {
+  type: 'file_read'
+  id: string
+  kind: 'attachment' | 'workspace'
+  target: string
+  name: string
+  from: number
+  to: number
+  total: number
+}
+
 export type ReplyBlock =
   | ThinkingPart
   | TextPart
@@ -102,6 +114,7 @@ export type ReplyBlock =
   | ToolErrorPart
   | AttachmentParsePart
   | WorkspaceFilePart
+  | FileReadPart
 
 /** 一次本地工具调用回给模型的结果；content 是当时完整的工具输出 */
 export type ToolTraceResult = {

@@ -39,6 +39,15 @@ export type AgentEvent =
       attachment?: AttachmentSummary
       /** write / edit 的产物，供 UI 显示文件卡片 */
       workspace?: { path: string; operation: 'created' | 'updated'; chars: number }
+      /** read 的窗口信息，供 UI 显示读取卡片 */
+      read?: {
+        kind: 'attachment' | 'workspace'
+        target: string
+        name: string
+        from: number
+        to: number
+        total: number
+      }
     }
   /**
    * 本轮产生的原始 function call 消息：assistant 工具调用与对应的 tool 结果。
@@ -150,6 +159,9 @@ export async function* runAgent(
       let sources: ToolSource[] = []
       let attachment: AttachmentSummary | undefined
       let workspace: { path: string; operation: 'created' | 'updated'; chars: number } | undefined
+      let read:
+        | { kind: 'attachment' | 'workspace'; target: string; name: string; from: number; to: number; total: number }
+        | undefined
       try {
         const parsed = call.arguments ? (JSON.parse(call.arguments) as Record<string, unknown>) : {}
         const result = await runTool(call.name, parsed, {
@@ -165,7 +177,17 @@ export async function* runAgent(
         sources = result.sources
         attachment = result.attachment
         workspace = result.workspace
-        yield { type: 'tool_result', call, round: step, sources, ok: true, attachment, workspace }
+        read = result.read
+        yield {
+          type: 'tool_result',
+          call,
+          round: step,
+          sources,
+          ok: true,
+          attachment,
+          workspace,
+          read,
+        }
       } catch (error) {
         const failure = classifyToolFailure(call.name, error)
         content = `Tool ${call.name} failed: ${failure.message}`

@@ -203,6 +203,15 @@ export type ToolRunResult = {
   attachment?: AttachmentSummary
   /** write / edit 的产物，供 UI 显示文件卡片 */
   workspace?: { path: string; operation: 'created' | 'updated'; chars: number }
+  /** read 的窗口信息，供 UI 显示读取卡片 */
+  read?: {
+    kind: 'attachment' | 'workspace'
+    target: string
+    name: string
+    from: number
+    to: number
+    total: number
+  }
 }
 
 /** UI 展示解析结果所需的元数据，不含全文 */
@@ -329,7 +338,12 @@ const encoder = new TextEncoder()
  * 对齐 harness 的 read 输出：编号行 + 续读/结束尾注，包在 path/type/content 信封里。
  * 按行分页，单行与总字节都有上限；即使命中字节上限也继续扫描全文，给出准确总行数。
  */
-const formatReadWindow = (name: string, text: string, offset: number, limit: number): string => {
+const formatReadWindow = (
+  name: string,
+  text: string,
+  offset: number,
+  limit: number
+): { content: string; from: number; to: number; total: number } => {
   const lines: string[] = []
   let totalLines = 0
   let outputBytes = 0
@@ -377,7 +391,12 @@ const formatReadWindow = (name: string, text: string, offset: number, limit: num
       ? `(Showing lines ${offset}-${endLine} of ${totalLines}. Use offset=${endLine + 1} to continue.)`
       : `(End of file - total ${totalLines} lines)`
   const body = lines.length > 0 ? `${lines.join('\n')}\n\n${footer}` : footer
-  return `<path>${name}</path>\n<type>file</type>\n<content>\n${body}\n</content>`
+  return {
+    content: `<path>${name}</path>\n<type>file</type>\n<content>\n${body}\n</content>`,
+    from: offset,
+    to: endLine,
+    total: totalLines,
+  }
 }
 
 const toSource = (result: SearchResult): ToolSource => ({
@@ -536,7 +555,19 @@ export const runTool = async (
       if (text === null) {
         throw new ToolFailure('read', 'not_found', `file not found: ${filePath}`)
       }
-      return { content: formatReadWindow(filePath, text, offset, limit), sources: [] }
+      const window = formatReadWindow(filePath, text, offset, limit)
+      return {
+        content: window.content,
+        sources: [],
+        read: {
+          kind: 'workspace',
+          target: filePath,
+          name: filePath,
+          from: window.from,
+          to: window.to,
+          total: window.total,
+        },
+      }
     }
     const doc = await ctx.loadFileText?.(fileId)
     const fileName = doc?.name ?? ctx.fileNames?.[fileId] ?? fileId
@@ -548,7 +579,19 @@ export const runTool = async (
         `attachment "${fileName}" is not plain text; call ocr_file with file_id "${fileId}" first`
       )
     }
-    return { content: formatReadWindow(fileName, text, offset, limit), sources: [] }
+    const window = formatReadWindow(fileName, text, offset, limit)
+    return {
+      content: window.content,
+      sources: [],
+      read: {
+        kind: 'attachment',
+        target: fileId,
+        name: fileName,
+        from: window.from,
+        to: window.to,
+        total: window.total,
+      },
+    }
   }
   if (name === 'write' || name === 'edit') {
     const filePath = typeof args.file_path === 'string' ? args.file_path.trim() : ''
