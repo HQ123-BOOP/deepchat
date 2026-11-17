@@ -191,15 +191,27 @@ export const canContinueReply = (reply: AssistantMessage): boolean => {
 }
 
 /**
- * 已结束或停止且有回答文本的回复才放进上下文；被安全拒绝的轮次不回传。
+ * 已结束或停止且有可回传内容的回复才放进上下文；被安全拒绝的轮次不回传。
  * 服务端模板提示不进入上下文。
+ *
+ * 对齐 harness：空正文但含思考或工具块的轮次同样可用——模型可能只调用工具
+ * 或只产出思考就结束，此时正文为空，但整轮对话不能因此丢失。
  */
 const isUsableReply = (message: Message): message is AssistantMessage =>
   message.role === 'assistant' &&
   (message.status === 'done' || message.status === 'stopped') &&
   message.stopReason !== 'refusal' &&
   !message.blocks.some((block) => block.type === 'text' && block.isTemplate) &&
-  getReplyText(message) !== ''
+  (getReplyText(message) !== '' ||
+    message.blocks.some(
+      (block) =>
+        (block.type === 'thinking' && block.thinking.trim() !== '') ||
+        block.type === 'server_tool_use' ||
+        block.type === 'web_search_tool_result' ||
+        block.type === 'web_fetch_tool_result' ||
+        block.type === 'tool_error' ||
+        block.type === 'attachment_parse'
+    ))
 
 /** 有文件时用内容块数组：先文件后文本，文件按 Files API 的 file_id 引用 */
 const toUserParam = ({ content, files }: UserMessage): MessageParam => {

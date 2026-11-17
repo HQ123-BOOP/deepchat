@@ -123,17 +123,67 @@ const SUMMARY_INSTRUCTION = [
   '- [待办、待确认的问题]',
 ].join('\n')
 
-/** 历史里的可用轮次：提问 + 有正文的回答 */
+/**
+ * 一条 assistant 回复是否有可回传的内容。
+ *
+ * 对齐 deepseek harness：不以「有没有正文文本」作为保留判据。模型可能只产出
+ * reasoning、或只调用工具就被停止 / 到达末尾，此时正文为空，但工具调用与结果
+ * 仍是这轮对话的一部分，必须连同用户提问一起进入下一轮上下文，否则用户点
+ * 「继续」时模型收到的是没有历史的孤立提问。
+ *
+ * 只有空 text 块、没有任何思考或工具痕迹的回复，才等价于 harness 里被丢弃的
+ * 空消息。
+ */
+const hasSendableContent = (reply: AssistantMessage): boolean =>
+  getReplyText(reply) !== '' ||
+  reply.blocks.some(
+    (block) =>
+      (block.type === 'thinking' && block.thinking.trim() !== '') ||
+      block.type === 'server_tool_use' ||
+      block.type === 'web_search_tool_result' ||
+      block.type === 'web_fetch_tool_result' ||
+      block.type === 'tool_error' ||
+      block.type === 'attachment_parse'
+  )
+
+/** 历史里的可用轮次：提问 + 有可回传内容的回答 */
 const usableRounds = (history: Message[]): [UserMessage, AssistantMessage][] => {
   const rounds: [UserMessage, AssistantMessage][] = []
   for (let i = 0; i + 1 < history.length; i++) {
     const [user, reply] = [history[i], history[i + 1]]
-    if (user.role === 'user' && reply.role === 'assistant' && getReplyText(reply) !== '') {
+    if (user.role === 'user' && reply.role === 'assistant' && hasSendableContent(reply)) {
       rounds.push([user, reply])
       i++
     }
   }
   return rounds
+}
+
+/**
+ * 把一轮里已交付的工具痕迹转成文本，附在 assistant 正文后。
+ *
+ * 对齐 harness「中断时只保留已交付内容」：工具调用本身不回传给模型（避免伪造
+ * 不具备结果的 function call），但搜索结果、读到的网页和失败原因作为文本带上，
+ * 让续写时能看到上一轮掌握了哪些外部信息，而不是面对一个只有提问的空壳。
+ */
+const toolBlocksToText = (reply: AssistantMessage): string => {
+  const lines: string[] = []
+  for (const block of reply.blocks) {
+    if (block.type === 'web_search_tool_result') {
+      for (const item of block.content) {
+        if (item.type === 'web_search_result' && item.url) {
+          const snippet = item.snippet?.slice(0, 300) ?? ''
+          lines.push(`- ${item.title || item.url}\n  ${item.url}${snippet ? `\n  ${snippet}` : ''}`)
+        }
+      }
+    } else if (block.type === 'web_fetch_tool_result' && block.content.type === 'web_fetch_result') {
+      const page = block.content
+      lines.push(`- ${page.content.title || page.url}\n  ${page.url}`)
+    } else if (block.type === 'tool_error') {
+      lines.push(`- 工具 ${block.tool} 调用失败：${block.code}`)
+    }
+  }
+  return lines.length ? `【上一轮检索到的资料】\n${lines.join('\n')}` : ''
 }
 
 const toRoundMessages = (user: UserMessage, reply: AssistantMessage): ProviderMessage[] => {
@@ -147,11 +197,14 @@ const toRoundMessages = (user: UserMessage, reply: AssistantMessage): ProviderMe
   )
   const reasoning = thinking.map((block) => block.thinking).join('\n\n')
   const reasoningSignature = thinking.find((block) => block.signature)?.signature
+  const evidence = toolBlocksToText(reply)
+  const content = [text, evidence].filter(Boolean).join('\n\n')
   return [
     { role: 'user', content: user.content },
     {
       role: 'assistant',
-      content: text,
+      // 空正文但有思考时靠 reasoning 携带内容；两者都空时留占位，避免发出纯空消息。
+      content: content || (reasoning ? '' : '（本轮未产生正文）'),
       ...(reasoning ? { reasoning } : {}),
       ...(reasoningSignature ? { reasoningSignature } : {}),
     },
