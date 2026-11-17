@@ -8,7 +8,7 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
@@ -16,6 +16,9 @@ pub struct Db {
     conn: Mutex<Connection>,
     /// 会话分块写入的临时缓冲：会话 JSON 可能达到数 MB，不能一次塞进 IPC。
     writes: Mutex<HashMap<String, String>>,
+    path: PathBuf,
+    /// 打开失败的库文件：不为 None 时 conn 指向内存中的临时空库，等待用户重建。
+    corrupt: Mutex<Option<String>>,
 }
 
 const SCHEMA: &str = "
@@ -88,14 +91,123 @@ fn open_connection(path: &Path) -> Result<Connection, String> {
     Ok(conn)
 }
 
+/// 数据库能否正常读取：损坏的库会让 quick_check 返回错误行。
+fn is_healthy(conn: &Connection) -> bool {
+    conn.query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0))
+        .map(|value| value == "ok")
+        .unwrap_or(false)
+}
+
+/// 损坏期间改用内存库：不读写磁盘，应用不会在启动阶段崩溃，也不覆盖原文件。
+fn memory_connection() -> Result<Connection, String> {
+    let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
+    conn.execute_batch(SCHEMA).map_err(|e| e.to_string())?;
+    Ok(conn)
+}
+
 pub fn init(app: &tauri::App) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let conn = open_connection(&dir.join("chat.sqlite3"))?;
+    let path = dir.join("chat.sqlite3");
+    let (conn, corrupt) = match open_connection(&path) {
+        Ok(conn) if is_healthy(&conn) => (conn, None),
+        Ok(conn) => {
+            drop(conn);
+            (memory_connection()?, Some(path.display().to_string()))
+        }
+        Err(_) => (memory_connection()?, Some(path.display().to_string())),
+    };
     app.manage(Db {
         conn: Mutex::new(conn),
         writes: Mutex::new(HashMap::new()),
+        path,
+        corrupt: Mutex::new(corrupt),
     });
     Ok(())
+}
+
+#[derive(Serialize)]
+pub struct DbHealth {
+    corrupt: bool,
+    path: String,
+}
+
+/// 前端启动时查询数据库状态，损坏则弹出恢复对话框。
+#[tauri::command]
+pub fn db_health(db: State<'_, Db>) -> Result<DbHealth, String> {
+    let corrupt = db.corrupt.lock().map_err(|e| e.to_string())?;
+    Ok(DbHealth {
+        corrupt: corrupt.is_some(),
+        path: db.path.display().to_string(),
+    })
+}
+
+/// 重试打开损坏的库；成功则换回磁盘上的真实连接。
+#[tauri::command]
+pub fn db_retry(db: State<'_, Db>) -> Result<bool, String> {
+    let mut corrupt = db.corrupt.lock().map_err(|e| e.to_string())?;
+    if corrupt.is_none() {
+        return Ok(true);
+    }
+    let Ok(conn) = open_connection(&db.path) else {
+        return Ok(false);
+    };
+    if !is_healthy(&conn) {
+        return Ok(false);
+    }
+    *db.conn.lock().map_err(|e| e.to_string())? = conn;
+    db.writes.lock().map_err(|e| e.to_string())?.clear();
+    *corrupt = None;
+    Ok(true)
+}
+
+/// 备份路径：优先 `chat.sqlite3.bak`，已存在时加时间戳，避免覆盖上一次备份。
+fn backup_path(path: &Path) -> PathBuf {
+    let candidate = PathBuf::from(format!("{}.bak", path.display()));
+    if !candidate.exists() {
+        return candidate;
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or_default();
+    PathBuf::from(format!("{}.{}.bak", path.display(), stamp))
+}
+
+/// 把损坏的库改名备份（含 WAL/SHM），再创建一个空库并换上新连接。旧文件不删除。
+#[tauri::command]
+pub fn db_rebuild(db: State<'_, Db>) -> Result<String, String> {
+    let mut corrupt = db.corrupt.lock().map_err(|e| e.to_string())?;
+    if corrupt.is_none() {
+        return Err("database is healthy".to_string());
+    }
+    let backup = backup_path(&db.path);
+    if db.path.exists() {
+        std::fs::rename(&db.path, &backup).map_err(|e| e.to_string())?;
+        for suffix in ["-wal", "-shm"] {
+            let from = PathBuf::from(format!("{}{}", db.path.display(), suffix));
+            if from.exists() {
+                std::fs::rename(&from, format!("{}{}", backup.display(), suffix))
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    let conn = open_connection(&db.path)?;
+    *db.conn.lock().map_err(|e| e.to_string())? = conn;
+    db.writes.lock().map_err(|e| e.to_string())?.clear();
+    *corrupt = None;
+    Ok(backup.display().to_string())
+}
+
+/// 数据目录所在磁盘的可用字节数：导入前据此判断空间是否足够。
+#[tauri::command]
+pub fn db_free_space(db: State<'_, Db>) -> Result<u64, String> {
+    let dir = db
+        .path
+        .parent()
+        .ok_or_else(|| "database path has no parent".to_string())?;
+    fs2::available_space(dir).map_err(|e| e.to_string())
 }
 
 /// 附件原件：id + MIME + base64 字节。字节走 base64，避免 JSON 数字数组的体积膨胀。

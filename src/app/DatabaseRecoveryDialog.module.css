@@ -1,0 +1,20 @@
+.text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 22px;
+  word-break: break-word;
+}
+
+.error {
+  margin: 12px 0 0;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+}

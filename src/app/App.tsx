@@ -32,6 +32,7 @@ import { stopReadAloud } from '../services/speech/readAloud.js'
 import { CollapsedSider } from '../components/sider/CollapsedSider.js'
 import { closeMobileSider, useMobileSider } from '../components/sider/mobileSiderState.js'
 import { MobileSider, Sider } from '../components/sider/Sider.js'
+import { DatabaseRecoveryDialog } from './DatabaseRecoveryDialog.js'
 import styles from './App.module.css'
 
 export const App = () => {
@@ -171,6 +172,7 @@ export const App = () => {
       </div>
       <SettingsDialog />
       {historySearchOpen ? <HistorySearchDialog onClose={closeHistorySearch} /> : null}
+      <DatabaseRecoveryDialog />
       <Toast />
     </>
   )

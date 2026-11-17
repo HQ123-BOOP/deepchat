@@ -157,6 +157,15 @@ export const zh = {
   historyRangeLatestUnit: '条',
   historyProgress: '正在处理 {done} / {total}',
   backupEmptyRange: '所选范围内没有会话',
+  backupNotEnoughSpace: '磁盘空间不足，无法导入。请清理磁盘后重试',
+  databaseCorrupted: '数据库已损坏',
+  databaseCorruptedHint:
+    '本地数据库无法打开。为避免覆盖原有数据，应用已暂停读写，你可以重试打开，或先备份损坏的数据库，再重建一个空数据库。',
+  databaseRecoveryFailed: '操作失败，数据库仍无法打开。请检查磁盘空间后重试',
+  backupAndRebuildDatabase: '备份并重建',
+  databaseRebuildDone: '新数据库已创建',
+  databaseRebuildDoneHint: '新数据库已创建，损坏的数据库已备份至 {path}。',
+  gotIt: '知道了',
   exportAllLabel: '导出历史对话',
   historyExportDescription:
     '按范围导出历史对话及本地图片原件；其他附件仅保留文件信息，不包含 API Key。',

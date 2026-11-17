@@ -24,6 +24,24 @@ const invoke = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T
 
 const DB_FILE_ID = 'chat-demo'
 
+export type DatabaseHealth = {
+  /** 磁盘上的库无法打开，当前连接指向内存中的临时空库 */
+  corrupt: boolean
+  path: string
+}
+
+/** 启动时查询数据库状态：损坏时前端弹恢复对话框，而不是让应用崩溃。 */
+export const health = (): Promise<DatabaseHealth> => invoke('db_health')
+
+/** 重试打开损坏的库；返回是否恢复成功。 */
+export const retryOpen = (): Promise<boolean> => invoke('db_retry')
+
+/** 备份损坏的库并重建空库；返回备份文件路径。 */
+export const rebuild = (): Promise<string> => invoke('db_rebuild')
+
+/** 数据库所在磁盘的可用字节数。 */
+export const freeSpace = (): Promise<number> => invoke('db_free_space')
+
 // 遗留的 IndexedDB 已不再是数据源；静默删除以释放空间，失败不影响使用。
 if (typeof indexedDB !== 'undefined') {
   void (() => {

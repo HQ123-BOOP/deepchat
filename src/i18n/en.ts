@@ -164,6 +164,17 @@ export const en = {
   historyRangeLatestUnit: 'chats',
   historyProgress: 'Processing {done} / {total}',
   backupEmptyRange: 'No conversations in the selected range',
+  backupNotEnoughSpace: 'Not enough disk space to import. Free up some space and try again.',
+  databaseCorrupted: 'Database corrupted',
+  databaseCorruptedHint:
+    'The local database cannot be opened. To avoid overwriting your data, read and write are paused. Retry, or back up the damaged database and create an empty one.',
+  databaseRecoveryFailed:
+    'The operation failed and the database still cannot be opened. Check free disk space and try again.',
+  backupAndRebuildDatabase: 'Back up and rebuild',
+  databaseRebuildDone: 'New database created',
+  databaseRebuildDoneHint:
+    'A new database has been created. The damaged database was backed up to {path}.',
+  gotIt: 'Got it',
   exportAllLabel: 'Export chats',
   historyExportDescription:
     'Exports the selected range of chats and locally stored images. Other attachments retain file details only. Your API Key is not included.',
