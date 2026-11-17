@@ -39,15 +39,29 @@ export const Modal = ({
   useEffect(() => {
     const token = {}
     openModals.push(token)
+    // 压入一条历史记录，Android 返回键先关弹窗而不是退出应用
+    const historyToken = `modal-${Date.now()}-${Math.random()}`
+    history.pushState({ ...history.state, [historyToken]: true }, '')
+    let popped = false
+    const onPop = () => {
+      popped = true
+      onCloseRef.current()
+    }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && openModals.at(-1) === token) {
         onCloseRef.current()
       }
     }
+    window.addEventListener('popstate', onPop)
     document.addEventListener('keydown', onKeyDown)
     return () => {
       openModals.splice(openModals.indexOf(token), 1)
+      window.removeEventListener('popstate', onPop)
       document.removeEventListener('keydown', onKeyDown)
+      // 通过按钮或遮罩关闭时把历史记录退掉，避免下次返回多退一步
+      if (!popped) {
+        history.back()
+      }
     }
   }, [])
 
