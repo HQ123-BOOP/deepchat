@@ -131,7 +131,12 @@ export const inspectArchive = async (
  * 再只解压保留会话的 JSON 与对应图片——跳过的条目完全不读取，耗时与所选范围成正比。
  * CRC 与大小校验只覆盖实际解压的条目。
  */
-export const importArchive = async (file: File, options: BackupOptions): Promise<void> => {
+export const importArchive = async (
+  file: File,
+  options: BackupOptions,
+  /** 本地会话 id → updatedAt：同样新或更新的会话直接跳过，不再解压 */
+  existing?: ReadonlyMap<string, number>
+): Promise<void> => {
   if (!(await isZipFile(file))) {
     fail('backupUnrecognized')
   }
@@ -150,13 +155,19 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
       JSON.parse(await (await readArchiveEntry(file, INDEX_PATH)).text())
     )
     // index 自带每会话的 updated_at（ISO 时间），范围筛选不解压任何会话 JSON
+    const inRange = selectInRange(
+      index.map((entry) => ({ id: entry.id, updatedAt: Date.parse(entry.updated_at) })),
+      (item) => item.updatedAt,
+      options.range,
+      Date.now()
+    )
     const keepIds = new Set(
-      selectInRange(
-        index.map((entry) => ({ id: entry.id, updatedAt: Date.parse(entry.updated_at) })),
-        (item) => item.updatedAt,
-        options.range,
-        Date.now()
-      ).map((item) => item.id)
+      inRange
+        .filter((entry) => {
+          const local = existing?.get(entry.id)
+          return local === undefined || entry.updatedAt > local
+        })
+        .map((entry) => entry.id)
     )
     // index 只列出成功写出的会话，与目录中的会话 JSON 文件一一对应。
     const listed = new Set(index.map((entry) => entry.id))
@@ -168,7 +179,7 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
     ) {
       fail('backupIncomplete')
     }
-    if (options.range.kind !== 'all' && keepIds.size === 0) {
+    if (options.range.kind !== 'all' && inRange.length === 0) {
       fail('backupEmptyRange')
     }
 
@@ -185,7 +196,7 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
     const fileBuffer: { id: string; blob: Blob }[] = []
     // 移动端 IPC 对单次 payload 很敏感：会话每批 16 条；
     // 图片按累计 3MB 或 8 张切批，小图少往返、大图不超限。
-    const SESSION_BATCH = 16
+    const SESSION_BATCH = 32
     const FILE_BATCH = 8
     const FILE_BATCH_BYTES = 3 * 1024 * 1024
     let fileBytes = 0
@@ -294,10 +305,13 @@ export const importArchive = async (file: File, options: BackupOptions): Promise
     await flushBuffers()
     // 兜底：选中的会话都应有结果，避免异常条目让进度停在 99%
     reportProgress(totalConversations, totalConversations, true)
-    if (options.range.kind !== 'all' && kept === 0) {
-      fail('backupEmptyRange')
+    // 选了会话却一条都没写进去，说明归档与 index 不一致
+    if (keepIds.size > 0 && kept === 0) {
+      fail('backupIncomplete')
     }
-    await db.updateStagingFileTypes(stored)
+    if (stored.size > 0) {
+      await db.updateStagingFileTypes(stored)
+    }
   } catch (error) {
     throw error instanceof ArchiveError ? new BackupError('backupIncomplete') : error
   }

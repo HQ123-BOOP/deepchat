@@ -79,7 +79,11 @@ export const importHistory = (file: File, options: BackupOptions): Promise<numbe
     const { checkArchiveFormat, importArchive } = await import('./history/importArchive.js')
     await checkArchiveFormat(file)
     await assertImportSpace(file)
-    return mergeHistory(() => importArchive(file, options))
+    return mergeHistory(async () => {
+      // 先取本地版本，导入时可跳过本地已是最新的会话，不再解压它们
+      const existing = await db.loadSessionVersions()
+      return importArchive(file, options, existing)
+    })
   })
 
 /** 确认删除后调用：以空历史原子替换全部本地会话与附件，保留 API Key 和其他设置。 */

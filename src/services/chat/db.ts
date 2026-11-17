@@ -320,6 +320,12 @@ export const commitStaging = async (): Promise<SessionSummary[]> => {
   return rows.map(toSessionSummaryOf)
 }
 
+/** 全部会话的更新时间，用于导入前跳过本地已是最新的会话 */
+export const loadSessionVersions = async (): Promise<Map<string, number>> => {
+  const rows = await invoke<{ id: string; updatedAt: number }[]>('db_session_versions')
+  return new Map(rows.map((row) => [row.id, row.updatedAt]))
+}
+
 export type MergeResult = {
   /** 实际写入的会话数：新增的，以及覆盖了更旧本地版本的部分 */
   imported: number

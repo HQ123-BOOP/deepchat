@@ -716,6 +716,9 @@ pub fn db_update_staging_file_types(
     db: State<'_, Db>,
     types: Vec<(String, String)>,
 ) -> Result<(), String> {
+    if types.is_empty() {
+        return Ok(());
+    }
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let map: std::collections::HashMap<String, String> = types.into_iter().collect();
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
@@ -731,6 +734,10 @@ pub fn db_update_staging_file_types(
             .map_err(|e| e.to_string())?
     };
     for (id, data) in rows {
+        // 没有图片的会话不需要解析整段 JSON
+        if !data.contains("\"isImage\":true") {
+            continue;
+        }
         let mut value: serde_json::Value = serde_json::from_str(&data).map_err(|e| e.to_string())?;
         let mut changed = false;
         if let Some(messages) = value.get_mut("messages").and_then(|v| v.as_array_mut()) {
@@ -760,6 +767,33 @@ pub fn db_update_staging_file_types(
         }
     }
     tx.commit().map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionVersion {
+    id: String,
+    updated_at: i64,
+}
+
+/// 全部会话的更新时间：导入前用它跳过本地已是最新的会话，避免无谓解压
+#[tauri::command]
+pub fn db_session_versions(db: State<'_, Db>) -> Result<Vec<SessionVersion>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, updated_at FROM sessions")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(SessionVersion {
+                id: row.get(0)?,
+                updated_at: row.get(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
 }
 
 /// 会话摘要里引用的附件 id

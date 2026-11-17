@@ -154,7 +154,7 @@ export const zh = {
   historyImportedOne: '已导入 1 个对话',
   historyImported: '已导入 {count} 个对话',
   historyImportNothingNew: '没有需要导入的新对话',
-  historyImportPreview: '将处理 {selected} 个对话（归档共 {total} 个）',
+  historyImportPreview: '将处理 {selected} 个对话（归档共 {total} 个，重复会自动跳过）',
   historyImportFailed:
     '文件导入失败，可能是文件格式错误或使用了旧版的对话导出 ZIP 文件，请前往 DeepSeek 重新导出历史对话文件后再次导入。',
   historyExportFailed: '导出失败：{message}',
