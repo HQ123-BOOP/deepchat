@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
-import { createConfiguredPiProvider, modelAcceptsImages } from '../providers/piAi.js'
+import { createConfiguredPiProvider, modelAcceptsImages, resolveModelLimits } from '../providers/piAi.js'
 import type { ProviderImage } from '../providers/types.js'
 import {
   EDIT_TOOL_SCHEMA,
@@ -11,7 +11,7 @@ import {
   WRITE_TOOL_SCHEMA,
 } from '../tools/registry.js'
 import { runProviderReply } from './providerReply.js'
-import { buildProviderMessages, type AttachmentRef } from './providerContext.js'
+import { buildProviderMessages, summarizeHistory, type AttachmentRef } from './providerContext.js'
 import { maybeGenerateTitle } from './autoTitle.js'
 import { createSystemPrompt } from './systemPrompt.js'
 import { useUploads } from '../attachments.js'
@@ -100,6 +100,7 @@ const unsavedSessions = new Set<string>()
 const pendingFiles = new Map<string, db.StoredFile[]>()
 const deletingSessions = new Set<string>()
 const deletionTasks = new Set<Promise<boolean>>()
+const compactingSessions = new Set<string>()
 const streamFlushes = new Map<string, () => void>()
 let accessSequence = 0
 let historyEpoch = 0
@@ -271,7 +272,11 @@ const settleInterrupted = (session: Session): Session => {
     ...session,
     messages: session.messages.map((m) =>
       m.role === 'assistant' && (m.status === 'pending' || m.status === 'streaming')
-        ? settleReply(m, 'stopped', session.updatedAt)
+        ? settleReply(
+            m.compaction?.running ? { ...m, compaction: undefined } : m,
+            'stopped',
+            session.updatedAt
+          )
         : m
     ),
   }
@@ -647,7 +652,10 @@ export const sendMessage = (targetSessionId: string | null) => {
   let sessionId = targetSessionId
   if (
     sessionId !== null &&
-    (deletingSessions.has(sessionId) || getStreamController(sessionId) || !getSession(sessionId))
+    (deletingSessions.has(sessionId) ||
+      compactingSessions.has(sessionId) ||
+      getStreamController(sessionId) ||
+      !getSession(sessionId))
   ) {
     return false
   }
@@ -745,7 +753,88 @@ export const regenerateReply = (sessionId: string, messageId?: string) => {
   void streamReply(sessionId, reply, { history, question })
 }
 
-/** 编辑提问后新增同父版本，保留原文件；旧问题的所有回答与后续对话仍可切回。 */
+/** 手动压缩（/compact）：把较老的历史换成摘要，记录挂到最后一条回复上 */
+export const compactSession = async (sessionId: string): Promise<boolean> => {
+  if (
+    get().importingHistory ||
+    !get().ready ||
+    deletingSessions.has(sessionId) ||
+    compactingSessions.has(sessionId) ||
+    getStreamController(sessionId)
+  ) {
+    return false
+  }
+  const session = getSession(sessionId)
+  if (!session) {
+    return false
+  }
+  const path = getVisibleMessages(session)
+  const lastReply = [...path].reverse().find((message) => message.role === 'assistant')
+  if (!lastReply) {
+    return false
+  }
+  compactingSessions.add(sessionId)
+  const controller = new AbortController()
+  set((state) => ({ streaming: { ...state.streaming, [sessionId]: controller } }))
+  updateReply(sessionId, {
+    ...lastReply,
+    compaction: { items: 0, tokens: 0, summary: '', createdAt: Date.now(), running: true },
+  })
+  try {
+    const settings = useSettings.getState()
+    const limits = resolveModelLimits(
+      {
+        provider: settings.provider.piProvider,
+        api: settings.provider.piApi,
+        baseUrl: settings.provider.piBaseUrl,
+        apiKey: settings.provider.apiKey,
+        contextWindow: settings.provider.contextWindow,
+        maxTokens: settings.provider.maxTokens,
+        inputModalities: settings.provider.inputModalities,
+      },
+      settings.provider.model
+    )
+    const compaction = await summarizeHistory({
+      provider: createConfiguredPiProvider(),
+      model: settings.provider.model,
+      systemPrompt: createSystemPrompt({
+        provider: settings.provider.piProvider,
+        model: settings.provider.model,
+        locale: settings.locale,
+        location: settings.location,
+      }),
+      history: path,
+      budget: { window: limits.window, maxOutput: limits.maxOutput },
+      signal: controller.signal,
+    })
+    const current = getSession(sessionId)?.messages.find((message) => message.id === lastReply.id)
+    if (!compaction || current?.role !== 'assistant') {
+      if (current?.role === 'assistant') {
+        updateReply(sessionId, { ...current, compaction: undefined })
+      }
+      return false
+    }
+    updateReply(sessionId, {
+      ...current,
+      compaction: { ...compaction, createdAt: Date.now() },
+    })
+    persist(sessionId)
+    return true
+  } catch {
+    const current = getSession(sessionId)?.messages.find((message) => message.id === lastReply.id)
+    if (current?.role === 'assistant') {
+      updateReply(sessionId, { ...current, compaction: undefined })
+    }
+    return false
+  } finally {
+    compactingSessions.delete(sessionId)
+    set((state) => ({
+      streaming: Object.fromEntries(
+        Object.entries(state.streaming).filter(([id]) => id !== sessionId)
+      ),
+    }))
+  }
+}
 export const editMessage = (sessionId: string, messageId: string, content: string): boolean => {
   if (get().importingHistory || deletingSessions.has(sessionId)) {
     return false
@@ -980,19 +1069,54 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
           return { data: await blobToBase64(blob), mimeType }
         }
       : undefined
-    const messages = await buildProviderMessages({
+    const limits = resolveModelLimits(
+      {
+        provider: settings.provider.piProvider,
+        api: settings.provider.piApi,
+        baseUrl: settings.provider.piBaseUrl,
+        apiKey: settings.provider.apiKey,
+        contextWindow: settings.provider.contextWindow,
+        maxTokens: settings.provider.maxTokens,
+        inputModalities: settings.provider.inputModalities,
+      },
+      settings.provider.model
+    )
+    const built = await buildProviderMessages({
       provider,
       model: settings.provider.model,
       systemPrompt,
       history: request.history,
       question: request.question,
-      budget: { window: 131072, maxOutput: 8192 },
+      budget: { window: limits.window, maxOutput: limits.maxOutput },
       tools: toolSchemas,
       images,
       attachments: refs,
       loadHistoryImage,
+      onCompactionStart: () => {
+        reply = {
+          ...reply,
+          compaction: {
+            items: 0,
+            tokens: 0,
+            summary: '',
+            createdAt: Date.now(),
+            running: true,
+          },
+        }
+        updateReply(sessionId, reply)
+      },
       signal: controller.signal,
     })
+    if (built.compaction) {
+      // 压缩完成后立刻展示，之后随这一轮回复一起落库
+      reply = { ...reply, compaction: { ...built.compaction, createdAt: Date.now() } }
+      updateReply(sessionId, reply)
+    } else if (reply.compaction?.running) {
+      // 摘要失败时撤掉「正在压缩」，请求继续使用未压缩的历史
+      reply = { ...reply, compaction: undefined }
+      updateReply(sessionId, reply)
+    }
+    const messages = built.messages
     reply = await runProviderReply({
       provider,
       model: settings.provider.model,

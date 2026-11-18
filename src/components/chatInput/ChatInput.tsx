@@ -9,7 +9,7 @@ import {
 } from '../base/icons.js'
 import { setSearch, useSettings } from '../../services/settings.js'
 import { useIsMobile } from '../../app/viewport.js'
-import { sendMessage, stopReply, useChatStore } from '../../services/chat/store.js'
+import { compactSession, sendMessage, stopReply, useChatStore } from '../../services/chat/store.js'
 import {
   addDraftFiles,
   EMPTY_DRAFT,
@@ -28,6 +28,7 @@ import { DragMask, useFileDrop } from './DragMask.js'
 import { showToast } from '../base/toastState.js'
 import { ACCEPT, useUploads } from '../../services/attachments.js'
 import { AttachmentSheet } from './AttachmentSheet.js'
+import { ContextMeter } from './ContextMeter.js'
 import { DraftAttachments } from './DraftAttachments.js'
 import { ReasoningMenu } from './ReasoningMenu.js'
 import { useVoiceInput } from './useVoiceInput.js'
@@ -160,6 +161,24 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const canSend = !importingHistory && !streaming && voice.status === 'idle' && draftReady
 
   const send = () => {
+    // /compact：手动压缩上下文，不产生用户消息
+    if (text.trim().toLowerCase() === '/compact' && attachments.length === 0) {
+      if (!sessionId) {
+        showToast({ key: 'compactUnavailable' })
+        return
+      }
+      if (!ensureApiKey()) {
+        return
+      }
+      setText('')
+      stopReadAloud()
+      void compactSession(sessionId).then((ok) => {
+        if (!ok) {
+          showToast({ key: 'compactFailed' })
+        }
+      })
+      return
+    }
     if (
       useChatStore.getState().importingHistory ||
       voice.status !== 'idle' ||
@@ -244,6 +263,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
               <span className={styles.toggleLabel}>{t('search')}</span>
             </button>
           </Tooltip>
+          <ContextMeter sessionId={sessionId} />
         </div>
         <div className={styles.right}>
           <VoiceButton

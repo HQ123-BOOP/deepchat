@@ -81,8 +81,10 @@ export const countTokens = (messages: ProviderMessage[]): number =>
 /** 压缩触发阈值与保留预算，公式对齐 harness：floor(min(W·r, W−O−B)) */
 export const thresholds = (budget: ContextBudget) => {
   const window = budget.window
-  const maxOutput = budget.maxOutput
-  const headroom = budget.headroom ?? 8192
+  // harness 默认预留 64K 给压缩本身；窗口很小时按比例收缩，避免预算为负
+  const headroom = Math.min(budget.headroom ?? 65536, Math.floor(window / 4))
+  // 输出预留同样封顶，模型目录缺失时 maxTokens 可能远大于窗口
+  const maxOutput = Math.min(budget.maxOutput, Math.floor(window / 4))
   const ratio = budget.thresholdRatio ?? 0.8
   const retainRatio = budget.retainRatio ?? 0.16
   return {
@@ -91,23 +93,50 @@ export const thresholds = (budget: ContextBudget) => {
   }
 }
 
+/** 压缩摘要的包装：让摘要作为已确立的背景被后续模型继续使用 */
+const CHECKPOINT_PREAMBLE =
+  'This is an automatically generated checkpoint condensing an earlier span of the conversation to free up context. Treat the captured context as established background and build on it without restating it. Continue the task directly from the messages that follow, without acknowledging this checkpoint.'
+
+/** 压缩引擎指令，结构与 deepseek harness 保持一致 */
 const SUMMARY_INSTRUCTION = [
-  '你是压缩引擎。把上面的对话压缩成一份结构化检查点，让另一个模型能无缝接手。',
+  'You are now acting as a compaction engine for this AI assistant. Condense the conversation ABOVE into a structured checkpoint that lets another model resume the work with no loss of essential context.',
   '',
-  '严格按下面的 Markdown 结构输出，每一节都要保留；没有内容的写「（无）」。用短句列表，不要写散文：',
+  'Output EXACTLY the Markdown structure below: keep every section, in order. Use terse bullets, not prose paragraphs. Write "(none)" for an empty section — never drop a section.',
   '',
-  '## 用户的核心诉求',
-  '- [最初与变化后的目标；措辞重要时原样引用]',
+  '## Primary Request and Intent',
+  "- [the user's original and evolving goals; quote verbatim where the exact wording matters]",
   '',
-  '## 关键事实与结论',
-  '- [已经确认的信息；标注来源 URL]',
+  '## Key Technical Concepts',
+  '- [technologies, frameworks, patterns, and conventions in play]',
   '',
-  '## 已排除或存疑的说法',
-  '- [被推翻或无法核实的结论，说明原因]',
+  '## Files and Code',
+  '- [exact path: why it matters, key changes or snippets]',
   '',
-  '## 未完成的事项',
-  '- [待办、待确认的问题]',
+  '## Errors and Fixes',
+  '- [error: how it was resolved, plus any related user feedback]',
+  '',
+  '## Pending Jobs',
+  '- [explicitly requested work not yet completed]',
+  '',
+  '## Current Work',
+  '- [precisely what was in progress at this checkpoint]',
+  '',
+  '## Next Step',
+  '- [the single next action, directly in line with the most recent request, or "(none)"]',
+  '',
+  '## Critical Context',
+  '- [decisions and their rationale, constraints, user preferences, open questions, data needed to continue]',
+  '',
+  'Rules:',
+  '- Write concise English engineering prose. Preserve exact file paths, commands, error strings, identifiers, numeric values, function signatures, and syntax fragments.',
+  '- Capture user feedback and explicit instructions faithfully, especially corrections.',
+  '- Do NOT mention this summarization request or that the context was compacted.',
+  '- Output only the checkpoint text: do not call any tool or take any other action.',
+  `- If the conversation already contains a ${SUMMARY_OPEN} block, it is a PRIOR checkpoint. Do not copy it forward verbatim: preserve still-true facts, drop stale ones, and merge newer information into a single consolidated summary under the same structure.`,
 ].join('\n')
+
+const frameSummary = (summary: string) =>
+  `${CHECKPOINT_PREAMBLE}\n\n${SUMMARY_OPEN}\n${summary}\n${SUMMARY_CLOSE}`
 
 /** 只统计会回传给模型的正文；模板提示（错误、拒绝）只给用户看 */
 const sendableText = (reply: AssistantMessage): string =>
@@ -326,10 +355,11 @@ const toRoundMessages = (
   return messages
 }
 
-/** 调一次模型生成摘要；失败时返回 null，由调用方退化为截断 */
+/** 调一次模型生成摘要；前缀与主请求一致，复用 KV 缓存；失败时返回 null */
 const summarize = async (
   provider: ChatProvider,
   model: string,
+  prefix: ProviderMessage[],
   messages: ProviderMessage[],
   signal?: AbortSignal
 ): Promise<string | null> => {
@@ -338,6 +368,7 @@ const summarize = async (
     for await (const event of provider.stream({
       model,
       messages: [
+        ...prefix,
         ...messages,
         { role: 'user', content: SUMMARY_INSTRUCTION },
       ],
@@ -350,7 +381,24 @@ const summarize = async (
   } catch {
     return null
   }
-  return text.trim() ? `${SUMMARY_OPEN}\n${text.trim()}\n${SUMMARY_CLOSE}` : null
+  return text.trim() || null
+}
+
+/** 一次压缩的结果，供界面展示；不参与回传 */
+export type CompactionInfo = {
+  /** 被替换的历史消息条数（累计） */
+  items: number
+  /** 被替换内容的估算 token（累计） */
+  tokens: number
+  /** 结构化摘要正文 */
+  summary: string
+  /** 压缩覆盖到的最后一条回复 id；后续请求据此跳过已压缩区间 */
+  throughId?: string
+}
+
+export type BuildContextResult = {
+  messages: ProviderMessage[]
+  compaction?: CompactionInfo
 }
 
 /** 供模型通过 ocr_file 工具引用的本地附件 */
@@ -371,6 +419,8 @@ export type BuildContextOptions = {
   attachments?: AttachmentRef[]
   /** 历史提问里的图片；返回 undefined 表示不支持、过大或读取失败 */
   loadHistoryImage?: (file: UserMessage['files'][number]) => Promise<ProviderImage | undefined>
+  /** 开始生成压缩摘要时通知调用方，先显示「正在压缩」 */
+  onCompactionStart?: () => void
   signal?: AbortSignal
 }
 
@@ -434,8 +484,9 @@ export const buildProviderMessages = async ({
   images,
   attachments,
   loadHistoryImage,
+  onCompactionStart,
   signal,
-}: BuildContextOptions): Promise<ProviderMessage[]> => {
+}: BuildContextOptions): Promise<BuildContextResult> => {
   const rounds = usableRounds(history)
   const { trigger, retain } = thresholds(budget)
 
@@ -497,37 +548,189 @@ export const buildProviderMessages = async ({
     return messages
   }
 
-  let body = flatten(0)
-  let tokens = countTokens([system, ...(toolHint ? [toolHint] : []), ...body])
-  if (tokens <= trigger) {
-    return [system, ...(toolHint ? [toolHint] : []), ...head(body)]
-  }
-
-  // 从最早的轮次开始切，保留最近的 retain 预算
-  let keepFrom = rounds.length
-  let kept = 0
+  // 历史里已有的压缩记录：只把它覆盖区间之后的轮次算作未压缩历史，避免每轮重复压缩
+  let compactedIndex = -1
+  let prior: AssistantMessage['compaction']
   for (let i = rounds.length - 1; i >= 0; i--) {
-    const round = toRoundMessages(
-      rounds[i][0],
-      rounds[i][1],
-      historyImages.get(rounds[i][0].id)
-    )
-    kept += countTokens(round)
-    if (kept > retain) {
+    const marker = rounds[i][1].compaction
+    if (!marker?.summary || marker.running) {
+      continue
+    }
+    // throughId 必须落在当前分支上，切换分支后旧记录自动失效
+    const end = marker.throughId
+      ? rounds.findIndex(([, reply]) => reply.id === marker.throughId)
+      : -1
+    if (end >= 0) {
+      compactedIndex = end
+      prior = marker
       break
     }
-    keepFrom = i
   }
-  const recent = flatten(keepFrom)
-  const olderMessages = flatten(0).slice(0, flatten(keepFrom).length)
-  const summary = olderMessages.length ? await summarize(provider, model, olderMessages, signal) : null
-  body = summary
-    ? [{ role: 'user', content: summary }, ...recent]
-    : recent
+  const priorMessage: ProviderMessage | null = prior?.summary
+    ? { role: 'user', content: frameSummary(prior.summary) }
+    : null
+  const activeFrom = compactedIndex + 1
+  const activeRounds = rounds.slice(activeFrom)
+  const activeBody = (from: number): ProviderMessage[] => {
+    const messages = flatten(activeFrom + from)
+    return priorMessage ? [priorMessage, ...messages] : messages
+  }
+
+  let body = activeBody(0)
+  let tokens = countTokens([system, ...(toolHint ? [toolHint] : []), ...body])
+  if (tokens <= trigger) {
+    return { messages: [system, ...(toolHint ? [toolHint] : []), ...head(body)] }
+  }
+
+  // 从最早的轮次开始切，保留最近的 retain 预算；至少保留最近一轮原文
+  let keepFrom = activeRounds.length
+  let kept = 0
+  for (let i = activeRounds.length - 1; i >= 0; i--) {
+    const round = toRoundMessages(
+      activeRounds[i][0],
+      activeRounds[i][1],
+      historyImages.get(activeRounds[i][0].id)
+    )
+    kept += countTokens(round)
+    keepFrom = i
+    if (kept >= retain) {
+      break
+    }
+  }
+  const recent = flatten(activeFrom + keepFrom)
+  const olderMessages: ProviderMessage[] = []
+  for (let i = 0; i < keepFrom; i++) {
+    olderMessages.push(
+      ...toRoundMessages(
+        activeRounds[i][0],
+        activeRounds[i][1],
+        historyImages.get(activeRounds[i][0].id)
+      )
+    )
+  }
+  let summary: string | null = null
+  if (olderMessages.length > 0) {
+    onCompactionStart?.()
+    // 与主请求共享 system 与工具说明；已有摘要作为旧 checkpoint 交给压缩引擎合并
+    summary = await summarize(
+      provider,
+      model,
+      [system, ...(toolHint ? [toolHint] : [])],
+      priorMessage ? [priorMessage, ...olderMessages] : olderMessages,
+      signal
+    )
+  }
+  if (summary) {
+    body = [{ role: 'user', content: frameSummary(summary) }, ...recent]
+  } else {
+    // 摘要失败时保留完整历史，仅在仍超预算时从最早轮次开始丢，避免只剩最近一轮
+    let from = 0
+    let total = countTokens([system, ...(toolHint ? [toolHint] : []), ...activeBody(0)])
+    while (from < activeRounds.length - 1 && total > trigger) {
+      total -= countTokens(
+        toRoundMessages(
+          activeRounds[from][0],
+          activeRounds[from][1],
+          historyImages.get(activeRounds[from][0].id)
+        )
+      )
+      from += 1
+    }
+    body = activeBody(from)
+  }
   tokens = countTokens([system, ...(toolHint ? [toolHint] : []), ...body])
   if (tokens > trigger) {
-    // 摘要也压不下来：只保留最近一轮，保证请求可用
-    body = flatten(Math.max(0, rounds.length - 1))
+    // 仍然压不下来：只保留最近一轮，保证请求可用
+    body = activeBody(Math.max(0, activeRounds.length - 1))
   }
-  return [system, ...(toolHint ? [toolHint] : []), ...head(body)]
+  return {
+    messages: [system, ...(toolHint ? [toolHint] : []), ...head(body)],
+    ...(summary
+      ? {
+          compaction: {
+            items: (prior?.items ?? 0) + olderMessages.length,
+            tokens: (prior?.tokens ?? 0) + countTokens(olderMessages),
+            summary,
+            throughId: activeRounds[keepFrom - 1][1].id,
+          },
+        }
+      : {}),
+  }
+}
+
+/**
+ * 手动压缩（/compact）：忽略压力阈值，压缩最近保留尾部之前的未压缩历史。
+ * 返回新的压缩记录，没有可压缩内容或摘要失败时返回 null。
+ */
+export const summarizeHistory = async ({
+  provider,
+  model,
+  systemPrompt,
+  history,
+  budget,
+  signal,
+}: {
+  provider: ChatProvider
+  model: string
+  systemPrompt: string
+  history: Message[]
+  budget: ContextBudget
+  signal?: AbortSignal
+}): Promise<CompactionInfo | null> => {
+  const rounds = usableRounds(history)
+  const { retain } = thresholds(budget)
+  // 已有压缩记录之后的轮次才算未压缩历史
+  let compactedIndex = -1
+  let prior: AssistantMessage['compaction']
+  for (let i = rounds.length - 1; i >= 0; i--) {
+    const marker = rounds[i][1].compaction
+    if (!marker?.summary || marker.running) {
+      continue
+    }
+    const end = marker.throughId
+      ? rounds.findIndex(([, reply]) => reply.id === marker.throughId)
+      : -1
+    if (end >= 0) {
+      compactedIndex = end
+      prior = marker
+      break
+    }
+  }
+  const activeRounds = rounds.slice(compactedIndex + 1)
+  // 保留最近的 retain 预算，至少保留最近一轮原文
+  let keepFrom = activeRounds.length
+  let kept = 0
+  for (let i = activeRounds.length - 1; i >= 0; i--) {
+    kept += countTokens(toRoundMessages(activeRounds[i][0], activeRounds[i][1]))
+    keepFrom = i
+    if (kept >= retain) {
+      break
+    }
+  }
+  if (keepFrom === 0) {
+    return null
+  }
+  const older: ProviderMessage[] = []
+  for (let i = 0; i < keepFrom; i++) {
+    older.push(...toRoundMessages(activeRounds[i][0], activeRounds[i][1]))
+  }
+  const priorMessage: ProviderMessage | null = prior?.summary
+    ? { role: 'user', content: frameSummary(prior.summary) }
+    : null
+  const summary = await summarize(
+    provider,
+    model,
+    [{ role: 'system', content: systemPrompt }],
+    priorMessage ? [priorMessage, ...older] : older,
+    signal
+  )
+  if (!summary) {
+    return null
+  }
+  return {
+    items: (prior?.items ?? 0) + older.length,
+    tokens: (prior?.tokens ?? 0) + countTokens(older),
+    summary,
+    throughId: activeRounds[keepFrom - 1][1].id,
+  }
 }

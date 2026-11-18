@@ -186,6 +186,20 @@ export type AssistantMessage = MessageBranch & {
    * 早期没有该字段的消息退化为把检索结果拼成文本。
    */
   toolTrace?: ToolTraceStep[]
+  /** 本轮请求触发的上下文压缩；只用于界面展示，不参与回传 */
+  compaction?: {
+    /** 被替换的历史消息条数（累计） */
+    items: number
+    /** 被替换内容的估算 token（累计） */
+    tokens: number
+    /** 结构化摘要正文 */
+    summary: string
+    createdAt: number
+    /** 摘要仍在生成中 */
+    running?: boolean
+    /** 压缩覆盖到的最后一条回复 id；后续请求据此跳过已压缩区间 */
+    throughId?: string
+  }
   stopReason?: StopReason
   stopDetails?: StopDetails
   /** 最近一次请求的用量，续写后更新 */

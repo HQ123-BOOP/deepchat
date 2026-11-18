@@ -14,6 +14,7 @@ import { toggleSearchPanel, useSearchPanel } from '../search/searchPanelState.js
 import { ReadAloudButton } from './ReadAloudButton.js'
 import { CopyButton } from './CopyButton.js'
 import { PresentedFiles } from './PresentedFiles.js'
+import { CompactionMarker } from './CompactionMarker.js'
 import { ReplyArea } from './ReplyArea.js'
 import { useReplyView } from './useReplyView.js'
 import {
@@ -72,6 +73,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   const summaryEntry = `${message.id}-summary`
   return (
     <div className={styles.message}>
+      {message.compaction ? <CompactionMarker message={message} /> : null}
       {refused ? null : (
         <ReplyArea
           sessionId={sessionId}

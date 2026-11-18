@@ -176,6 +176,15 @@ const buildModel = (config: PiAiConfig, modelId: string): Model<Api> => {
   return model as unknown as Model<Api>
 }
 
+/** 当前配置下模型可用的上下文窗口与最大输出，供上下文预算与压缩使用 */
+export const resolveModelLimits = (
+  config: PiAiConfig,
+  modelId: string
+): { window: number; maxOutput: number } => {
+  const model = buildModel(config, modelId)
+  return { window: model.contextWindow, maxOutput: model.maxTokens }
+}
+
 /** ProviderMessage[] → pi-ai Context；system 独立成 systemPrompt，工具参数直接是 JSON Schema */
 const toContext = (request: ProviderRequest, config: PiAiConfig): Context => {
   const api = config.api as Api
